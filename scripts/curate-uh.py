@@ -54,17 +54,24 @@ FILES = {
     "_hut_logs1": "buildings/pioneers/lumberjack_barrack/as_lumberjack_barrack0/logs_01/135/0.png",
     "_hut_logs2": "buildings/pioneers/lumberjack_barrack/as_lumberjack_barrack0/logs_02/135/0.png",
     "sawmill": "buildings/pioneers/weaver/as_weaver0/idle/135/0.png",
-    "lj_idle": "units/lumberjack/as_lumberjackunit0/idle/135/0000.png",
-    "lj_walk1": "units/lumberjack/as_lumberjackunit0/move/135/0001.png",
-    "lj_walk2": "units/lumberjack/as_lumberjackunit0/move/135/0002.png",
-    "lj_walk3": "units/lumberjack/as_lumberjackunit0/move/135/0003.png",
-    "lj_walk4": "units/lumberjack/as_lumberjackunit0/move/135/0004.png",
-    "lj_carry1": "units/lumberjack/as_lumberjackunit0/move_full/135/0001.png",
-    "lj_carry2": "units/lumberjack/as_lumberjackunit0/move_full/135/0002.png",
-    "lj_carry3": "units/lumberjack/as_lumberjackunit0/move_full/135/0003.png",
-    "lj_carry4": "units/lumberjack/as_lumberjackunit0/move_full/135/0004.png",
-    "lj_work": "units/lumberjack/as_lumberjackunit0/work/135/0000.png",
+    "mushroom": "terrain/ambient/as_mushroom0/idle/135/000.png",
+    "rock2": "terrain/ambient/as_rock1/idle/135/0.png",
 }
+
+ROTS = ["r0", "r45", "r90", "r135", "r180", "r225", "r270", "r315"]
+ROT_DIR = {"r0": "0", "r45": "45", "r90": "90", "r135": "135",
+           "r180": "180", "r225": "225", "r270": "270", "r315": "315"}
+UNIT_ACTS = {"idle": ("idle", ["0000"]),
+             "walk": ("move", ["0001", "0002", "0003", "0004"]),
+             "carry": ("move_full", ["0001", "0002", "0003", "0004"]),
+             "work": ("work", ["0000"])}
+for _rot in ROTS:
+    _d = ROT_DIR[_rot]
+    for _act, (_dir, _frames) in UNIT_ACTS.items():
+        # lj_idle_r135 / lj_walk1_r135 / lj_carry1_r135 / lj_work_r135
+        for _i, _fr in enumerate(_frames):
+            _slot = f"lj_{_act}_{_rot}" if len(_frames) == 1 else f"lj_{_act}{_i + 1}_{_rot}"
+            FILES[_slot] = f"units/lumberjack/as_lumberjackunit0/{_dir}/{_d}/{_fr}.png"
 
 TILES = {"grass", "grass_var", "water", "road"}
 
@@ -108,15 +115,31 @@ d.polygon([(34, 12), (54, 18), (34, 27)], fill=(178, 58, 46, 255), outline=OL)
 sprites["flag"] = flag
 anchors["flag"] = (32, 54)
 
+# scaffold iso procedural (andamio de obra, paleta UH; derivado CC-BY-SA)
+scaf = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+d = ImageDraw.Draw(scaf)
+WOOD, WOOD_D = (139, 90, 43, 255), (94, 58, 26, 255)
+d.ellipse([24, 112, 104, 122], fill=(0, 0, 0, 60))
+for px in (34, 62, 90):
+    d.rectangle([px, 30, px + 6, 114], fill=WOOD, outline=OL)
+for py in (44, 78):
+    d.polygon([(28, py), (100, py - 18), (100, py - 12), (28, py + 6)], fill=WOOD_D, outline=OL)
+d.line([(34, 110), (68, 40)], fill=WOOD_D, width=3)
+d.line([(96, 110), (62, 40)], fill=WOOD_D, width=3)
+sprites["scaffold"] = scaf
+anchors["scaffold"] = (64, 114)
+
 for slot, img in sprites.items():
     img.save(OUT / f"{slot}.png")
 
 # --- atlas: shelf packing 512px ---
-order = ["grass", "grass_var", "water", "road", "stump", "rock", "flag",
-         "lj_idle", "lj_walk1", "lj_walk2", "lj_walk3", "lj_walk4",
-         "lj_carry1", "lj_carry2", "lj_carry3", "lj_carry4", "lj_work",
-         "pine", "leaf_tree", "hut", "hut_logs1", "hut_logs2",
-         "sawmill", "warehouse"]
+unit_frames = [s for s in sprites
+               if s.startswith("lj_") and any(s.endswith(f"_{r}") for r in
+               ("r0", "r45", "r90", "r135", "r180", "r225", "r270", "r315"))]
+order = (["grass", "grass_var", "water", "road", "stump", "rock", "rock2",
+          "mushroom", "flag", "scaffold",
+          "pine", "leaf_tree", "hut", "hut_logs1", "hut_logs2",
+          "sawmill", "warehouse"] + sorted(unit_frames))
 W = 512
 x = y = row_h = 0
 frames: dict = {}
@@ -161,9 +184,10 @@ board = Image.new("RGBA", (760, 420), (24, 22, 32, 255))
 d = ImageDraw.Draw(board)
 d.text((12, 8), "SETTLERSRAMOS UH-iso - Unknown Horizons (CC-BY-SA 3.0) + derivados", fill=(255, 255, 255, 255))
 d.text((12, 26), "rotacion 135 - contenido CC-BY-SA, ver CREDITS.md", fill=(180, 180, 180, 255))
-show = ["grass", "water", "road", "pine", "leaf_tree", "stump", "rock",
-        "hut", "hut_logs2", "sawmill", "warehouse",
-        "lj_idle", "lj_walk1", "lj_carry1", "lj_work", "flag"]
+show = ["grass", "water", "road", "pine", "leaf_tree", "stump", "rock", "rock2",
+        "mushroom", "hut", "hut_logs2", "sawmill", "warehouse", "scaffold",
+        "lj_idle_r135", "lj_walk1_r135", "lj_carry1_r135", "lj_work_r135",
+        "lj_idle_r270", "lj_walk1_r90", "flag"]
 for i, s in enumerate(show):
     im = sprites[s].copy()
     im.thumbnail((120, 120))
@@ -172,5 +196,6 @@ for i, s in enumerate(show):
     d.text((x0, y0 + 126), s, fill=(255, 255, 255, 255))
 board.save(OUT / "_style_master.png")
 board.save(RAW / "_style_master.png")
+(OUT / "MANIFEST.txt").write_text("\n".join(sorted(sprites)) + "\n_states: _style_master\n")
 
 print(f"UH-iso OK: {len(sprites)} sprites, atlas {atlas_w}x{atlas_h}, {len(frames)} frames")

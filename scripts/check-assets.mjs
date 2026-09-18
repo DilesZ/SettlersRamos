@@ -1,39 +1,24 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
-// Lote UH-iso (migración desde Kenney): 24 sprites + tablero. Regenera con python scripts/curate-uh.py.
-const required = [
-  'assets/approved/grass.png',
-  'assets/approved/grass_var.png',
-  'assets/approved/water.png',
-  'assets/approved/road.png',
-  'assets/approved/pine.png',
-  'assets/approved/leaf_tree.png',
-  'assets/approved/stump.png',
-  'assets/approved/rock.png',
-  'assets/approved/warehouse.png',
-  'assets/approved/hut.png',
-  'assets/approved/hut_logs1.png',
-  'assets/approved/hut_logs2.png',
-  'assets/approved/sawmill.png',
-  'assets/approved/lj_idle.png',
-  'assets/approved/lj_walk1.png',
-  'assets/approved/lj_walk2.png',
-  'assets/approved/lj_walk3.png',
-  'assets/approved/lj_walk4.png',
-  'assets/approved/lj_carry1.png',
-  'assets/approved/lj_carry2.png',
-  'assets/approved/lj_carry3.png',
-  'assets/approved/lj_carry4.png',
-  'assets/approved/lj_work.png',
-  'assets/approved/flag.png',
-  'assets/approved/_style_master.png'
-];
+// El lote lo define scripts/curate-uh.py vía assets/approved/MANIFEST.txt.
+// Sin lote completo no hay build con juego real.
+const manifest = 'assets/approved/MANIFEST.txt';
+if (!existsSync(manifest)) {
+  console.error('ASSET-CHECK FAIL: falta MANIFEST.txt. Regenera con python scripts/curate-uh.py');
+  process.exit(1);
+}
+const required = readFileSync(manifest, 'utf8')
+  .split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('_states:'))
+  .map((s) => `assets/approved/${s}.png`);
+required.push('assets/approved/_style_master.png');
 
 const missing = required.filter((f) => !existsSync(f));
 if (missing.length > 0) {
-  console.error('ASSET-CHECK FAIL. Faltan (regenera con python scripts/curate-cc0.py):');
+  console.error('ASSET-CHECK FAIL. Faltan:');
   for (const m of missing) console.error(' - ' + m);
-  console.error('\nVer scripts/curate-cc0.py y assets/NANO_BANANA_BRIEF.md');
+  console.error('\nRegenera con python scripts/curate-uh.py');
   process.exit(1);
 }
-console.log('ASSET-CHECK OK: lote 1+ presente.');
+console.log(`ASSET-CHECK OK: lote UH-iso presente (${required.length} ficheros).`);
