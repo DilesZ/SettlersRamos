@@ -161,6 +161,16 @@ class GameScene extends Phaser.Scene {
   }
 
   create(data: { fresh?: boolean }) {
+    // Reset total (create también corre en restart tras victoria).
+    this.acc = 0;
+    this.speed = 1;
+    this.saveTimer = 0;
+    this.chopKey = null;
+    this.chopSndAt = 0;
+    this.placing = null;
+    this.ghostCell = null;
+    for (const m of [this.settlerSprites, this.settlerRot, this.treeSprites,
+      this.treeBaseX, this.stumpSprites, this.bldImgs, this.bldBars, this.bldFrame]) m.clear();
     this.world = data.fresh === false ? (loadGame(createDemoWorld) ?? createDemoWorld()) : createDemoWorld();
     const w = this.world;
     this.prevPlanks = totalPlanks(w);
@@ -265,7 +275,7 @@ class GameScene extends Phaser.Scene {
     }
     this.sawBar = this.add.rectangle(0, 0, 40, 5, 0xffd23f).setDepth(480).setVisible(false);
     this.chopBar = this.add.rectangle(0, 0, 30, 4, 0x7ddf64).setDepth(480).setVisible(false);
-    this.scene.launch('Hud');
+    if (!this.scene.isActive('Hud')) this.scene.launch('Hud');
   }
 
   private hud(): HudScene {
@@ -543,6 +553,7 @@ class HudScene extends Phaser.Scene {
   private panelTimer = 0;
   private panelId = 0;
   private winText!: Phaser.GameObjects.Text;
+  private winRestart!: Phaser.GameObjects.Text;
   private dayOverlay!: Phaser.GameObjects.Rectangle;
   private muteBtn!: Phaser.GameObjects.Text;
 
@@ -651,6 +662,17 @@ class HudScene extends Phaser.Scene {
       fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
       padding: { x: 24, y: 16 }, align: 'center',
     }).setOrigin(0.5).setDepth(20).setVisible(false);
+    this.winRestart = this.add.text(480, 360, '↻  JUGAR DE NUEVO', {
+      fontSize: '20px', color: '#1a2b1a', backgroundColor: '#ffd98a',
+      padding: { x: 20, y: 8 },
+    }).setOrigin(0.5).setDepth(20).setVisible(false)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        clearSave();
+        this.winText.setVisible(false);
+        this.winRestart.setVisible(false);
+        this.gameScene().scene.restart({ fresh: true });
+      });
   }
 
   private drawMinimap(): void {
@@ -724,8 +746,12 @@ class HudScene extends Phaser.Scene {
     );
     if (w.won && !this.winText.visible) {
       this.winText.setVisible(true);
+      this.winRestart.setVisible(true);
       game.sfx('sfx-victory', 0.9);
       saveGame(w);
+    } else if (!w.won && this.winText.visible) {
+      this.winText.setVisible(false);
+      this.winRestart.setVisible(false);
     }
   }
 }

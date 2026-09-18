@@ -24,6 +24,8 @@
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
 - [ ] T009 Save/load localStorage + victoria 10 tablones
-- [ ] T010 Balance 8-12 min + deploy prod Vercel
+- [x] T010 Balance 8-12 min: tala 24 s, sierra 28 s, obra 30 s, rebrote 140 s.
+  Medido: victoria autoplay en ~8,3 min (495 s). Test `pacing` fija banda 7-13 min.
+  Botón Jugar de nuevo en victoria. Deploy prod continuo OK.
 
 Regla: T004-T010 bloqueadas hasta T002b aprobada (sin placeholders en main).

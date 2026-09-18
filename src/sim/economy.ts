@@ -52,7 +52,7 @@ export interface World {
 
 export const SPEED = 2.2; // celdas por segundo a x1
 export const BUILD_TIME: number = balance.buildTime;
-export const REGROW_TIME = 120;
+export const REGROW_TIME = 140;
 
 const SHAPES: Record<BuildKind, Array<[number, number]>> = {
   hut: [[0, 0], [1, 0]],
@@ -205,7 +205,6 @@ export function placementError(w: World, kind: BuildKind, cells: Tile[]): string
     anchors.some((a) => Math.abs(a.x - c.x) + Math.abs(a.y - c.y) <= r),
   );
   if (!inside) return 'Fuera del territorio';
-  void kind;
   return null;
 }
 
