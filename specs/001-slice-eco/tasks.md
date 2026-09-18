@@ -4,7 +4,7 @@
 - [x] T002b Lote1 CC0 Kenney (sustituye T002 procedural): 9 CC0 + 3 derivados en
   `assets/approved/` + vendor + `CREDITS.md` (`python scripts/curate-cc0.py`).
   Enmienda: vista iso → top-down 64x64 (constitución + plan actualizados).
-- [ ] T003 Atlas: `atlas.png/.json` + `PreloadScene` muestra 1 árbol + 1 obrero andando
+- [x] T003 Atlas (`python scripts/make-atlas.py` -> `public/atlas/`) + `GameScene` demo top-down
 - [ ] T004 Sim grid + A* + tests (`astar.test.ts`)
 - [ ] T005 Economy tick: talar→tronco→tablón + tests (`economy.test.ts`)
 - [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
