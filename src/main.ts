@@ -34,6 +34,8 @@ function rotFor(dx: number, dy: number): string {
 }
 
 const SHROOMS: Array<[number, number]> = [[6, 3], [12, 5], [2, 6]];
+const POSTS: Array<[number, number]> = [[3, 2], [7, 1], [11, 2], [12, 5], [8, 7], [3, 7]];
+const GRASS_TINTS = [0xffffff, 0xf4ffea, 0xeafbdc, 0xfdffef];
 
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
@@ -44,6 +46,11 @@ class PreloadScene extends Phaser.Scene {
   constructor() { super('Preload'); }
   preload() {
     this.load.atlas('uh', 'atlas/atlas.png', 'atlas/atlas.json');
+    this.load.audio('sfx-chop', 'sfx/chop.ogg');
+    this.load.audio('sfx-click', 'sfx/click.ogg');
+    this.load.audio('sfx-thud', 'sfx/thud.ogg');
+    this.load.audio('sfx-plank', 'sfx/plank.ogg');
+    this.load.audio('sfx-victory', 'sfx/victory.ogg');
   }
   create() { this.scene.start('Game'); }
 }
@@ -52,6 +59,7 @@ class GameScene extends Phaser.Scene {
   private world!: World;
   private acc = 0;
   private speed = 1;
+  private muted = false;
   private settlerSprites = new Map<number, Phaser.GameObjects.Image>();
   private settlerRot = new Map<number, string>();
   private treeSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -67,6 +75,17 @@ class GameScene extends Phaser.Scene {
   private sawBar!: Phaser.GameObjects.Rectangle;
   private chopBar!: Phaser.GameObjects.Rectangle;
   private winText!: Phaser.GameObjects.Text;
+  private mm!: Phaser.GameObjects.Graphics;
+  private mmTimer = 0;
+  private panel!: Phaser.GameObjects.Container;
+  private panelTitle!: Phaser.GameObjects.Text;
+  private panelBody!: Phaser.GameObjects.Text;
+  private panelTimer = 0;
+  // estado previo para eventos de sonido/partículas
+  private prevPlanks = 0;
+  private prevStumps = 0;
+  private prevBuilt = '';
+  private chopSndAt = 0;
 
   constructor() { super('Game'); }
 
@@ -78,14 +97,51 @@ class GameScene extends Phaser.Scene {
       .setDepth(depth);
   }
 
+  private sfx(key: string, volume = 1): void {
+    if (this.muted) return;
+    try { this.sound.play(key, { volume }); } catch { /* audio aún bloqueado */ }
+  }
+
+  private burst(x: number, y: number, color: number, n = 6): void {
+    for (let i = 0; i < n; i++) {
+      const c = this.add.circle(x, y, 2 + Math.random() * 2, color, 0.9)
+        .setDepth(450);
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 8 + Math.random() * 18;
+      this.tweens.add({
+        targets: c, x: x + Math.cos(ang) * dist, y: y + Math.sin(ang) * dist - 10,
+        alpha: 0, duration: 500 + Math.random() * 300, onComplete: () => c.destroy(),
+      });
+    }
+  }
+
   create() {
     this.world = createDemoWorld();
     const w = this.world;
+    // Cámara RTS: zoom inicial + drag + rueda
+    const cam = this.cameras.main;
+    cam.setZoom(1.3);
+    cam.centerOn(422, 235);
+    let dragX = 0;
+    let dragY = 0;
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { dragX = p.x; dragY = p.y; });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (p.isDown && !p.rightButtonDown()) {
+        cam.scrollX = Phaser.Math.Clamp(cam.scrollX - (p.x - dragX) / cam.zoom, -120, 340);
+        cam.scrollY = Phaser.Math.Clamp(cam.scrollY - (p.y - dragY) / cam.zoom, -80, 220);
+      }
+      dragX = p.x; dragY = p.y;
+    });
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 1.0, 2.0));
+    });
+    // Suelo con variación de tinte determinista
     for (let y = 0; y < w.grid.h; y++) {
       for (let x = 0; x < w.grid.w; x++) {
         const t = w.grid.get(x, y).terrain;
         const frame = t === 'road' ? 'road' : t === 'water' ? 'water' : t === 'rock' ? 'grass' : 'grass';
         const img = this.put(frame, x, y, (x + y) * 10);
+        if (frame === 'grass') img.setTint(GRASS_TINTS[(x * 7 + y * 13) % GRASS_TINTS.length]);
         if (t === 'water') {
           this.tweens.add({ targets: img, alpha: 0.88, duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
         }
@@ -93,10 +149,19 @@ class GameScene extends Phaser.Scene {
       }
     }
     for (const [x, y] of SHROOMS) this.put('mushroom', x, y, (x + y) * 10 + 1);
-    // Edificios: la cabaña empieza construida; sierra y almacén se construyen en partida.
+    // Postes de territorio
+    for (const [x, y] of POSTS) {
+      const { sx, sy } = iso(x, y);
+      this.add.rectangle(sx, sy - 8, 4, 14, 0x6b4a26).setDepth((x + y) * 10 + 1);
+      this.add.triangle(sx, sy - 18, 0, 6, 8, 6, 4, 0, 0xb33a2e).setDepth((x + y) * 10 + 1);
+    }
+    // Edificios clicables
     const hc = footprintCenter(w.hut.cells);
     this.hutImg = this.put('hut', hc.x, hc.y, (hc.x + hc.y) * 10 + 3);
     this.hutFrame = 'hut';
+    this.hutImg.setInteractive({ useHandCursor: true });
+    this.hutImg.on('pointerdown', () => this.showPanel('Cabaña del leñador',
+      () => `Troncos en stock: ${w.hut.logs}`));
     for (const b of [w.sawmill, w.warehouse]) {
       const c = footprintCenter(b.cells);
       const img = this.put('scaffold', c.x, c.y, (c.x + c.y) * 10 + 3);
@@ -104,12 +169,15 @@ class GameScene extends Phaser.Scene {
       const p = iso(c.x, c.y);
       const bar = this.add.rectangle(p.sx, p.sy - 84, 44, 5, 0xffd23f).setDepth(480);
       this.siteBars.set(b.kind, bar);
+      img.setInteractive({ useHandCursor: true });
+      const title = b.kind === 'sawmill' ? 'Sierra' : 'Almacén';
+      img.on('pointerdown', () => this.showPanel(title, () => this.buildingInfo(b.kind)));
     }
     const tag = (x: number, y: number, name: string) => {
       const { sx, sy } = iso(x, y);
       this.add.text(sx, sy + 26, name, {
         fontSize: '11px', color: '#fff', backgroundColor: '#00000077',
-      }).setOrigin(0.5).setDepth(500);
+      }).setOrigin(0.5).setDepth(490);
     };
     tag(hc.x, hc.y, 'LEÑADOR');
     const sc0 = footprintCenter(w.sawmill.cells);
@@ -117,9 +185,10 @@ class GameScene extends Phaser.Scene {
     tag(sc0.x, sc0.y, 'SIERRA');
     tag(wc0.x, wc0.y, 'ALMACÉN');
     this.flagImg = this.put('flag', 3.4, 6.1, 200);
-    // Humo de la sierra (aparece al construirse; visible siempre, sutil)
+    // Humo de la sierra
+    const smoke = iso(sc0.x + 0.35, sc0.y - 0.15);
     for (let i = 0; i < 3; i++) {
-      const puff = this.add.circle(sc0.x * 0 + iso(sc0.x + 0.35, sc0.y - 0.15).sx, iso(sc0.x + 0.35, sc0.y - 0.15).sy - 52, 5, 0xe8e8e8, 0.5).setDepth(400);
+      const puff = this.add.circle(smoke.sx, smoke.sy - 52, 5, 0xe8e8e8, 0.5).setDepth(400);
       this.tweens.add({
         targets: puff, y: puff.y - 30, alpha: 0, scale: 1.8,
         duration: 2200, delay: i * 700, repeat: -1,
@@ -148,22 +217,96 @@ class GameScene extends Phaser.Scene {
     }
     this.sawBar = this.add.rectangle(0, 0, 40, 5, 0xffd23f).setDepth(480).setVisible(false);
     this.chopBar = this.add.rectangle(0, 0, 30, 4, 0x7ddf64).setDepth(480).setVisible(false);
-    this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(500);
-    this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(500);
-    this.add.text(12, 10, '⚒ SETTLERS RAMOS · iso UH', { fontSize: '17px', color: '#ffd98a' }).setDepth(501);
+    // HUD fijo (no sigue a la cámara)
+    const fix = (o: Phaser.GameObjects.GameObject) => (o as Phaser.GameObjects.Image).setScrollFactor(0);
+    const bar = this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(500);
+    const bar2 = this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(500);
+    const title = this.add.text(12, 10, '⚒ SETTLERS RAMOS · iso UH', { fontSize: '17px', color: '#ffd98a' }).setDepth(501);
     this.hud = this.add.text(330, 10, '', { fontSize: '15px', color: '#fff' }).setDepth(501);
+    for (const o of [bar, bar2, title, this.hud]) fix(o);
     const btn = (x: number, label: string, fn: () => void) => {
-      this.add.text(x, 8, label, {
+      const t = this.add.text(x, 8, label, {
         fontSize: '15px', color: '#ffe08a', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
-      }).setDepth(501).setInteractive({ useHandCursor: true }).on('pointerdown', fn);
+      }).setDepth(501).setInteractive({ useHandCursor: true }).setScrollFactor(0)
+        .on('pointerdown', () => { this.sfx('sfx-click', 0.5); fn(); });
+      return t;
     };
-    btn(836, '❚❚', () => { this.speed = 0; });
-    btn(876, '1×', () => { this.speed = 1; });
-    btn(916, '2×', () => { this.speed = 2; });
+    const muteBtn = btn(740, '🔊', () => {
+      this.muted = !this.muted;
+      muteBtn.setText(this.muted ? '🔇' : '🔊');
+      if (!this.muted) this.sfx('sfx-click', 0.5);
+    });
+    btn(786, '❚❚', () => { this.speed = 0; });
+    btn(826, '1×', () => { this.speed = 1; });
+    btn(876, '2×', () => { this.speed = 2; });
+    this.input.keyboard?.on('keydown-M', () => { this.muted = !this.muted; });
+    // Minimapa
+    this.add.rectangle(828, 440, 124, 68, 0x000000, 0.55).setDepth(501).setScrollFactor(0);
+    this.mm = this.add.graphics().setDepth(502).setScrollFactor(0);
+    const mmZone = this.add.zone(830, 442, 120, 64).setOrigin(0).setDepth(503)
+      .setScrollFactor(0).setInteractive({ useHandCursor: true });
+    mmZone.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      const cx = Math.floor((p.x - 830) / 8);
+      const cy = Math.floor((p.y - 442) / 8);
+      if (cx < 0 || cy < 0 || cx >= w.grid.w || cy >= w.grid.h) return;
+      const { sx, sy } = iso(cx, cy);
+      cam.centerOn(sx, sy);
+      this.sfx('sfx-click', 0.4);
+    });
+    // Panel de edificio
+    this.panelTitle = this.add.text(16, 470, '', { fontSize: '15px', color: '#ffd98a' }).setDepth(502).setScrollFactor(0);
+    this.panelBody = this.add.text(16, 492, '', { fontSize: '13px', color: '#fff' }).setDepth(502).setScrollFactor(0);
+    const panelBg = this.add.rectangle(8, 462, 300, 70, 0x000000, 0.6).setOrigin(0).setDepth(501).setScrollFactor(0);
+    this.panel = this.add.container(0, 0, [panelBg, this.panelTitle, this.panelBody]).setDepth(501).setScrollFactor(0).setVisible(false);
     this.winText = this.add.text(480, 250, '¡VICTORIA!\n10 tablones entregados', {
       fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
       padding: { x: 24, y: 16 }, align: 'center',
-    }).setOrigin(0.5).setDepth(600).setVisible(false);
+    }).setOrigin(0.5).setDepth(600).setScrollFactor(0).setVisible(false);
+  }
+
+  private buildingInfo(kind: string): string {
+    const w = this.world;
+    const b = kind === 'sawmill' ? w.sawmill : w.warehouse;
+    if (!b.built) {
+      return b.constructing
+        ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
+        : `Solar: faltan ${b.needLogs - b.gotLogs} troncos`;
+    }
+    if (kind === 'sawmill') {
+      return w.sawmill.busy ? 'Cortando tablón…' : w.sawmill.done ? 'Tablón listo para recoger' : 'Esperando troncos';
+    }
+    return `Tablones: ${w.warehouse.planks}/10`;
+  }
+
+  private showPanel(title: string, body: () => string): void {
+    this.panelTitle.setText(title);
+    this.panelBody.setText(body());
+    this.panel.setVisible(true);
+    this.panelTimer = 8;
+    this.sfx('sfx-click', 0.4);
+  }
+
+  private drawMinimap(): void {
+    const w = this.world;
+    const g = this.mm;
+    g.clear();
+    for (let y = 0; y < w.grid.h; y++) {
+      for (let x = 0; x < w.grid.w; x++) {
+        const c = w.grid.get(x, y);
+        let col = 0x5a8f3e;
+        if (c.terrain === 'road') col = 0xb08d57;
+        else if (c.terrain === 'water') col = 0x5aa3c8;
+        else if (c.terrain === 'forest') col = 0x2f6b2f;
+        else if (c.terrain === 'rock') col = 0x9a9a9a;
+        if (c.building) col = 0xc46a2e;
+        g.fillStyle(col, 1);
+        g.fillRect(830 + x * 8, 442 + y * 8, 8, 8);
+      }
+    }
+    for (const s of w.settlers) {
+      g.fillStyle(s.carry ? 0xffe08a : 0xffffff, 1);
+      g.fillCircle(830 + s.x * 8 + 4, 442 + s.y * 8 + 4, 2.5);
+    }
   }
 
   update(time: number, delta: number) {
@@ -205,7 +348,31 @@ class GameScene extends Phaser.Scene {
     for (const [k, img] of this.stumpSprites) {
       if (!seenStumps.has(k)) { img.destroy(); this.stumpSprites.delete(k); }
     }
-    // Obras: andamio + barra (troncos aportados u obra en curso)
+    // Eventos: tala (tocón nuevo), tablón, obra terminada, victoria
+    if (w.stumps.length > this.prevStumps) {
+      const st = w.stumps[w.stumps.length - 1];
+      const p = iso(st.x, st.y);
+      this.burst(p.sx, p.sy - 20, 0x8b5a2b, 8);
+      this.sfx('sfx-thud', 0.8);
+    }
+    this.prevStumps = w.stumps.length;
+    if (w.warehouse.planks > this.prevPlanks) {
+      const wc = footprintCenter(w.warehouse.cells);
+      const p = iso(wc.x, wc.y);
+      this.burst(p.sx, p.sy - 40, 0xffd23f, 6);
+      this.sfx('sfx-plank', 0.8);
+    }
+    this.prevPlanks = w.warehouse.planks;
+    const builtKey = `${w.sawmill.built}${w.warehouse.built}`;
+    if (this.prevBuilt && builtKey !== this.prevBuilt) {
+      this.sfx('sfx-thud', 1);
+      const b = w.warehouse.built && this.prevBuilt[1] === 'f' ? w.warehouse : w.sawmill;
+      const c = footprintCenter(b.cells);
+      const p = iso(c.x, c.y);
+      this.burst(p.sx, p.sy - 40, 0xdddddd, 10);
+    }
+    this.prevBuilt = builtKey;
+    // Obras
     for (const b of [w.sawmill, w.warehouse]) {
       const img = this.siteImgs.get(b.kind);
       const bar = this.siteBars.get(b.kind);
@@ -227,7 +394,7 @@ class GameScene extends Phaser.Scene {
       this.hutFrame = wantHut;
       this.hutImg.setTexture('uh', wantHut);
     }
-    // Temblor del árbol talado
+    // Leñador: temblor + sonido de hacha
     const jack = w.settlers[0];
     const newChopKey = jack.state === 'chopping' && jack.to ? `${jack.to.x},${jack.to.y}` : null;
     if (this.chopKey && this.chopKey !== newChopKey) {
@@ -237,7 +404,15 @@ class GameScene extends Phaser.Scene {
     this.chopKey = newChopKey;
     if (newChopKey) {
       const t = this.treeSprites.get(newChopKey);
-      if (t) t.x = this.treeBaseX.get(newChopKey)! + Math.sin(time * 0.045) * 2;
+      if (t) {
+        t.x = this.treeBaseX.get(newChopKey)! + Math.sin(time * 0.045) * 2;
+        if (time - this.chopSndAt > 1500) {
+          this.chopSndAt = time;
+          this.sfx('sfx-chop', 0.5);
+          const p = iso(jack.to!.x, jack.to!.y);
+          this.burst(p.sx, p.sy - 50, 0x6fae4e, 3);
+        }
+      }
     }
     // Colonos en 8 direcciones
     for (const s of w.settlers) {
@@ -277,13 +452,32 @@ class GameScene extends Phaser.Scene {
       this.sawBar.setPosition(p.sx, p.sy - 78);
       this.sawBar.setScale(Math.max(0.05, w.sawmill.timer / 10), 1);
     } else this.sawBar.setVisible(false);
+    // Minimapa (4 Hz) + panel temporal
+    this.mmTimer += delta;
+    if (this.mmTimer > 250) {
+      this.mmTimer = 0;
+      this.drawMinimap();
+    }
+    if (this.panel.visible) {
+      this.panelTimer -= delta / 1000;
+      if (this.panelTimer <= 0) this.panel.setVisible(false);
+      else {
+        // refresca el cuerpo mientras se ve
+        const t = this.panelTitle.text;
+        if (t === 'Cabaña del leñador') this.panelBody.setText(`Troncos en stock: ${w.hut.logs}`);
+        else if (t === 'Sierra' || t === 'Almacén') this.panelBody.setText(this.buildingInfo(t === 'Sierra' ? 'sawmill' : 'warehouse'));
+      }
+    }
     const spd = this.speed === 0 ? 'PAUSA' : `${this.speed}×`;
     const obra = !w.sawmill.built ? `Obra sierra ${w.sawmill.gotLogs}/2`
       : !w.warehouse.built ? `Obra almacén ${w.warehouse.gotLogs}/2` : 'Colonia lista';
     this.hud.setText(
       `🪵 ${w.hut.logs}   🧱 ${w.warehouse.planks}/10   ${obra}   [${spd}]`,
     );
-    if (w.won) this.winText.setVisible(true);
+    if (w.won && !this.winText.visible) {
+      this.winText.setVisible(true);
+      this.sfx('sfx-victory', 0.9);
+    }
   }
 }
 

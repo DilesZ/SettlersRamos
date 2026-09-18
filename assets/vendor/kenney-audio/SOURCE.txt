@@ -1,0 +1,1 @@
+SFX CC0 Kenney (kenney.nl) via mirror github.com/ETdoFresh/kenney.nl : chop.ogg (rpg audio), click.ogg=metalClick (rpg audio), thud.ogg=impactWood_medium_000 (impact sounds), plank.ogg=impactPlank_medium_000 (impact sounds), victory.ogg=jingles_PIZZI05 (music jingles pizzicato). Licencias en License_*.txt
