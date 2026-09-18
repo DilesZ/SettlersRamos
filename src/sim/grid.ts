@@ -3,7 +3,7 @@ export type Terrain = 'grass' | 'road' | 'forest' | 'rock' | 'water';
 
 export interface Cell {
   terrain: Terrain;
-  building: string | null; // id edificio
+  building: number | null; // id de edificio (0 = ninguno... se usa null)
 }
 
 export class Grid {

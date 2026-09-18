@@ -5,8 +5,12 @@
   "roadSpeed": 1.5,
   "times": { "chopTree": 8, "sawPlank": 10, "quarryStone": 12 },
   "costs": {
-    "woodcutter": { "logs": 2, "stones": 0 },
-    "sawmill": { "logs": 2, "stones": 2 },
-    "quarry": { "logs": 2, "stones": 0 }
-  }
+    "hut": { "logs": 2, "planks": 0 },
+    "sawmill": { "logs": 4, "planks": 0 },
+    "warehouse": { "logs": 4, "planks": 2 }
+  },
+  "needLogsInitial": 2,
+  "buildTime": 15,
+  "territoryRadius": 6,
+  "maxLumberjacks": 6
 }

@@ -47,11 +47,19 @@ await page.screenshot({ path: 'smoke-game.png' });
 const vGame = await variance('smoke-game.png');
 console.log('juego varianza:', vGame.toFixed(1));
 
+// T006: menú construir -> sierra (470,508 juego => +20,+16 página) y solar en (6,2)
+await page.mouse.click(490, 524);
+await page.waitForTimeout(1000);
+await page.screenshot({ path: 'smoke-place.png' });
+const vPlace = await variance('smoke-place.png');
+console.log('colocación varianza:', vPlace.toFixed(1));
+
 await browser.close();
 
 let ok = true;
 if (vTitle < 8) { console.log('FAIL: título vacío'); ok = false; }
 if (vGame < 12) { console.log('FAIL: juego vacío tras JUGAR (¿no avanza del título?)'); ok = false; }
+if (vPlace < 12) { console.log('FAIL: pantalla vacía en modo colocación'); ok = false; }
 if (errors.length > 0) { console.log('ERRORES:', errors.slice(0, 10)); ok = false; }
 console.log(ok ? 'SMOKE OK' : 'SMOKE FAIL');
 process.exit(ok ? 0 : 1);

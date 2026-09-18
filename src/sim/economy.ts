@@ -1,11 +1,11 @@
 // Sim económica desacoplada del render. Tick fijo 50ms, determinista.
-// Migración UH-iso: edificios con huella (varias celdas), bosque/agua bloquean,
-// tocones visuales al talar.
+// T006: N edificios (cabañas/sierras/almacenes) con costes, territorio y colocación.
 import { Grid } from './grid';
 import { astar, Tile } from './astar';
 import balance from '../data/balance.json';
 
 export type Carry = 'log' | 'plank' | null;
+export type BuildKind = 'hut' | 'sawmill' | 'warehouse';
 
 export interface Settler {
   id: number;
@@ -16,47 +16,49 @@ export interface Settler {
   state: string;
   timer: number;
   carry: Carry;
-  // tarea actual del portador
   from: { x: number; y: number } | null;
   to: { x: number; y: number } | null;
-  building: 'sawmill' | 'warehouse' | null;
+  building: 'sawmill' | 'warehouse' | null; // destino del portador
+  siteId: number | null; // obra objetivo del constructor
 }
 
 export interface Building {
-  kind: 'hut' | 'sawmill' | 'warehouse';
-  cells: Tile[]; // huella lógica (todas marcadas con building en la rejilla)
-  logs: number; // cabaña
-  busy: boolean; // sierra
-  timer: number; // sierra
-  done: boolean; // sierra: tablón listo
-  planks: number; // almacén
-  // construcción (T006-visual): la cabaña empieza construida; sierra y almacén
-  // necesitan 2 troncos cada uno + tiempo de obra con andamio.
+  id: number;
+  kind: BuildKind;
+  cells: Tile[];
   built: boolean;
-  needLogs: number;
-  gotLogs: number;
   constructing: boolean;
   buildTimer: number;
+  needLogs: number;
+  gotLogs: number;
+  logs: number; // stock en cabañas
+  busy: boolean; // sierra trabajando
+  timer: number; // sierra
+  done: boolean; // sierra: tablón listo
+  planks: number; // stock en almacenes
 }
-
-export const BUILD_TIME = 15;
 
 export interface Stump { x: number; y: number; age: number }
 
 export interface World {
   grid: Grid;
   settlers: Settler[];
-  hut: Building;
-  sawmill: Building;
-  warehouse: Building;
-  stumps: Stump[]; // tocones visuales (transitables); rebrotan a los 120 s
+  buildings: Building[];
+  stumps: Stump[];
   time: number;
   won: boolean;
+  nextId: number;
 }
 
+export const SPEED = 2.2; // celdas por segundo a x1
+export const BUILD_TIME: number = balance.buildTime;
 export const REGROW_TIME = 120;
 
-export const SPEED = 2.2; // celdas por segundo a x1
+const SHAPES: Record<BuildKind, Array<[number, number]>> = {
+  hut: [[0, 0], [1, 0]],
+  sawmill: [[0, 0], [1, 0]],
+  warehouse: [[0, 0], [1, 0], [2, 0]],
+};
 
 function adjacentFree(grid: Grid, tx: number, ty: number): Tile | null {
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]];
@@ -67,7 +69,7 @@ function adjacentFree(grid: Grid, tx: number, ty: number): Tile | null {
 }
 
 /** Celda libre adyacente a cualquier celda de la huella. */
-function adjacentTo(grid: Grid, cells: Tile[]): Tile | null {
+export function adjacentTo(grid: Grid, cells: Tile[]): Tile | null {
   for (const c of cells) {
     const adj = adjacentFree(grid, c.x, c.y);
     if (adj) return adj;
@@ -110,8 +112,45 @@ function moveAlong(s: Settler, dt: number): boolean {
   return false;
 }
 
-function markFootprint(grid: Grid, kind: string, cells: Tile[]): void {
-  for (const c of cells) grid.get(c.x, c.y).building = kind;
+export function byId(w: World, id: number): Building | undefined {
+  return w.buildings.find((b) => b.id === id);
+}
+
+export function ofKind(w: World, kind: BuildKind, builtOnly = true): Building[] {
+  return w.buildings.filter((b) => b.kind === kind && (!builtOnly || b.built));
+}
+
+function nearest(
+  list: Building[], fx: number, fy: number, pred: (b: Building) => boolean = () => true,
+): Building | null {
+  let best: Building | null = null;
+  let bd = Infinity;
+  for (const b of list) {
+    if (!pred(b)) continue;
+    const c = b.cells[0];
+    const d = Math.abs(c.x - fx) + Math.abs(c.y - fy);
+    if (d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+
+export function nearestHutWithLogs(w: World, fx: number, fy: number): Building | null {
+  return nearest(ofKind(w, 'hut'), fx, fy, (b) => b.logs > 0);
+}
+
+function markFootprint(grid: Grid, id: number, cells: Tile[]): void {
+  for (const c of cells) grid.get(c.x, c.y).building = id;
+}
+
+function makeBuilding(w: World, kind: BuildKind, cells: Tile[], built: boolean, needLogs: number): Building {
+  const b: Building = {
+    id: w.nextId++, kind, cells, built,
+    constructing: false, buildTimer: 0, needLogs, gotLogs: built ? needLogs : 0,
+    logs: 0, busy: false, timer: 0, done: false, planks: 0,
+  };
+  markFootprint(w.grid, b.id, cells);
+  w.buildings.push(b);
+  return b;
 }
 
 export function createDemoWorld(): World {
@@ -126,25 +165,88 @@ export function createDemoWorld(): World {
   grid.setTerrain(12, 1, 'rock');
   grid.setTerrain(13, 2, 'rock');
   for (const [x, y] of [[13, 6], [14, 6], [13, 7], [14, 7]]) grid.setTerrain(x, y, 'water');
-  const hut: Building = { kind: 'hut', cells: [{ x: 4, y: 6 }, { x: 5, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0, built: true, needLogs: 0, gotLogs: 0, constructing: false, buildTimer: 0 };
-  const sawmill: Building = { kind: 'sawmill', cells: [{ x: 7, y: 6 }, { x: 8, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0, built: false, needLogs: 2, gotLogs: 0, constructing: false, buildTimer: 0 };
-  const warehouse: Building = { kind: 'warehouse', cells: [{ x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0, built: false, needLogs: 2, gotLogs: 0, constructing: false, buildTimer: 0 };
-  markFootprint(grid, 'hut', hut.cells);
-  markFootprint(grid, 'sawmill', sawmill.cells);
-  markFootprint(grid, 'warehouse', warehouse.cells);
-  const w: World = { grid, settlers: [], hut, sawmill, warehouse, stumps: [], time: 0, won: false };
+  const w: World = { grid, settlers: [], buildings: [], stumps: [], time: 0, won: false, nextId: 1 };
+  makeBuilding(w, 'hut', [{ x: 4, y: 6 }, { x: 5, y: 6 }], true, 0);
+  makeBuilding(w, 'sawmill', [{ x: 7, y: 6 }, { x: 8, y: 6 }], false, balance.needLogsInitial);
+  makeBuilding(w, 'warehouse', [{ x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }], false, balance.needLogsInitial);
   const jack: Settler = {
     id: 1, job: 'lumberjack', x: 4, y: 5, path: [], state: 'toTree',
-    timer: 0, carry: null, from: null, to: null, building: null,
+    timer: 0, carry: null, from: null, to: null, building: null, siteId: null,
   };
   assignTree(w, jack);
   const mkCarrier = (id: number): Settler => ({
     id, job: 'carrier', x: 10, y: 5, path: [], state: 'idle',
-    timer: 0, carry: null, from: null, to: null, building: null,
+    timer: 0, carry: null, from: null, to: null, building: null, siteId: null,
   });
   w.settlers = [jack, mkCarrier(2), mkCarrier(3)];
   return w;
 }
+
+// ---------- colocación (T006) ----------
+
+export function footprintFor(kind: BuildKind, ax: number, ay: number): Tile[] {
+  return SHAPES[kind].map(([dx, dy]) => ({ x: ax + dx, y: ay + dy }));
+}
+
+/** ¿La huella es construible? Terreno hierba, sin edificios y dentro del territorio. */
+export function placementError(w: World, kind: BuildKind, cells: Tile[]): string | null {
+  for (const c of cells) {
+    if (!w.grid.inBounds(c.x, c.y)) return 'Fuera del mapa';
+    const cell = w.grid.get(c.x, c.y);
+    if (cell.terrain !== 'grass') return 'Solo en hierba';
+    if (cell.building !== null) return 'Ocupado';
+  }
+  const r: number = balance.territoryRadius;
+  const anchors: Tile[] = [];
+  for (const b of w.buildings) {
+    if (b.kind === 'warehouse' || b.kind === 'hut') anchors.push(...b.cells);
+  }
+  const inside = cells.some((c) =>
+    anchors.some((a) => Math.abs(a.x - c.x) + Math.abs(a.y - c.y) <= r),
+  );
+  if (!inside) return 'Fuera del territorio';
+  void kind;
+  return null;
+}
+
+export function totalLogs(w: World): number {
+  return ofKind(w, 'hut').reduce((a, b) => a + b.logs, 0);
+}
+
+export function totalPlanks(w: World): number {
+  return ofKind(w, 'warehouse').reduce((a, b) => a + b.planks, 0);
+}
+
+function payCost(w: World, kind: BuildKind): boolean {
+  const cost = (balance.costs as Record<BuildKind, { logs: number; planks: number }>)[kind];
+  if (totalLogs(w) < cost.logs || totalPlanks(w) < cost.planks) return false;
+  let need = cost.logs;
+  for (const b of ofKind(w, 'hut')) {
+    const take = Math.min(b.logs, need);
+    b.logs -= take;
+    need -= take;
+    if (need <= 0) break;
+  }
+  need = cost.planks;
+  for (const b of ofKind(w, 'warehouse')) {
+    const take = Math.min(b.planks, need);
+    b.planks -= take;
+    need -= take;
+    if (need <= 0) break;
+  }
+  return true;
+}
+
+/** Cobra el coste y crea la obra (sin construir). Null si no se puede. */
+export function placeBuilding(w: World, kind: BuildKind, anchor: Tile): Building | null {
+  const cells = footprintFor(kind, anchor.x, anchor.y);
+  if (placementError(w, kind, cells)) return null;
+  const cost = (balance.costs as Record<BuildKind, { logs: number; planks: number }>)[kind];
+  if (!payCost(w, kind)) return null;
+  return makeBuilding(w, kind, cells, false, cost.logs);
+}
+
+// ---------- lógica de colonos ----------
 
 function assignTree(w: World, s: Settler): void {
   const t = nearestForest(w, Math.round(s.x), Math.round(s.y));
@@ -172,59 +274,70 @@ function tickLumberjack(w: World, s: Settler, dt: number): void {
       w.grid.setTerrain(s.to.x, s.to.y, 'grass');
       w.stumps.push({ x: s.to.x, y: s.to.y, age: 0 });
       s.carry = 'log';
-      const adj = adjacentTo(w.grid, w.hut.cells);
+      const hut = nearest(ofKind(w, 'hut'), Math.round(s.x), Math.round(s.y));
+      const adj = hut ? adjacentTo(w.grid, hut.cells) : null;
       if (adj) setPathTo(w, s, adj.x, adj.y);
+      s.siteId = hut ? hut.id : null; // cabaña destino
       s.state = 'toHut';
     }
     return;
   }
   if (s.state === 'toHut') {
     if (moveAlong(s, dt)) {
-      w.hut.logs++;
+      const hut = (s.siteId != null ? byId(w, s.siteId) : null)
+        ?? nearest(ofKind(w, 'hut'), Math.round(s.x), Math.round(s.y));
+      if (hut) hut.logs++;
       s.carry = null;
+      s.siteId = null;
       assignTree(w, s);
     }
   }
 }
 
-/** Primera obra sin terminar que aún necesita troncos (sierra antes que almacén). */
+/** Primera obra sin terminar que aún necesita troncos (sierras, almacenes, cabañas). */
 function siteNeedingLogs(w: World): Building | null {
-  if (!w.sawmill.built && w.sawmill.gotLogs < w.sawmill.needLogs) return w.sawmill;
-  if (!w.warehouse.built && w.warehouse.gotLogs < w.warehouse.needLogs) return w.warehouse;
+  const order: BuildKind[] = ['sawmill', 'warehouse', 'hut'];
+  for (const k of order) {
+    const b = w.buildings.find((x) => x.kind === k && !x.built && x.gotLogs < x.needLogs);
+    if (b) return b;
+  }
   return null;
 }
 
 function tickBuilder(w: World, s: Settler, dt: number): void {
   if (s.state === 'idle') {
     const site = siteNeedingLogs(w);
-    if (site && w.hut.logs > 0) {
-      const adj = adjacentTo(w.grid, w.hut.cells);
+    const hut = site ? nearestHutWithLogs(w, Math.round(s.x), Math.round(s.y)) : null;
+    if (site && hut) {
+      const adj = adjacentTo(w.grid, hut.cells);
       if (!adj) return;
       setPathTo(w, s, adj.x, adj.y);
-      s.building = site.kind === 'warehouse' ? 'warehouse' : 'sawmill';
+      s.siteId = site.id;
       s.state = 'bPickup';
     }
     return;
   }
   if (s.state === 'bPickup') {
     if (moveAlong(s, dt)) {
-      if (w.hut.logs > 0) {
-        w.hut.logs--;
+      const hut = nearestHutWithLogs(w, Math.round(s.x), Math.round(s.y));
+      const site = s.siteId != null ? byId(w, s.siteId) : null;
+      if (hut && site && !site.built && hut.logs > 0) {
+        hut.logs--;
         s.carry = 'log';
-        const site = s.building === 'warehouse' ? w.warehouse : w.sawmill;
         const adj = adjacentTo(w.grid, site.cells);
         if (adj) setPathTo(w, s, adj.x, adj.y);
         s.state = 'bDrop';
       } else {
         s.state = 'idle';
+        s.siteId = null;
       }
     }
     return;
   }
   if (s.state === 'bDrop') {
     if (moveAlong(s, dt)) {
-      const site = s.building === 'warehouse' ? w.warehouse : w.sawmill;
-      if (!site.built && site.gotLogs < site.needLogs && s.carry === 'log') {
+      const site = s.siteId != null ? byId(w, s.siteId) : null;
+      if (site && !site.built && site.gotLogs < site.needLogs && s.carry === 'log') {
         site.gotLogs++;
         s.carry = null;
         if (site.gotLogs >= site.needLogs) {
@@ -232,8 +345,99 @@ function tickBuilder(w: World, s: Settler, dt: number): void {
           site.buildTimer = BUILD_TIME;
         }
       } else {
-        // La obra avanzó sin él: devuelve el tronco a la cabaña.
-        if (s.carry === 'log') w.hut.logs++;
+        if (s.carry === 'log') {
+          const hut = nearest(ofKind(w, 'hut'), Math.round(s.x), Math.round(s.y));
+          if (hut) hut.logs++;
+          s.carry = null;
+        }
+      }
+      s.state = 'idle';
+      s.siteId = null;
+    }
+  }
+}
+
+function tickCarrier(w: World, s: Settler, dt: number): void {
+  const rx = Math.round(s.x);
+  const ry = Math.round(s.y);
+  const goPickup = (from: Building, cargo: 'sawmill' | 'warehouse', dst: Building) => {
+    const adj = adjacentTo(w.grid, from.cells);
+    if (!adj) return;
+    setPathTo(w, s, adj.x, adj.y);
+    const c = from.cells[0];
+    s.from = { x: c.x, y: c.y };
+    const dc = dst.cells[0];
+    s.to = { x: dc.x, y: dc.y };
+    s.building = cargo;
+    s.state = 'toPickup';
+  };
+  if (s.state === 'idle') {
+    const readySaw = nearest(ofKind(w, 'sawmill'), rx, ry, (b) => b.done);
+    const anyWh = nearest(ofKind(w, 'warehouse'), rx, ry);
+    if (readySaw && anyWh) {
+      goPickup(readySaw, 'warehouse', anyWh);
+      return;
+    }
+    const hut = nearestHutWithLogs(w, rx, ry);
+    const idleSaw = nearest(ofKind(w, 'sawmill'), rx, ry, (b) => !b.busy && !b.done);
+    if (hut && idleSaw) {
+      goPickup(hut, 'sawmill', idleSaw);
+    }
+    return;
+  }
+  if (s.state === 'toPickup') {
+    if (moveAlong(s, dt)) {
+      if (s.building === 'sawmill') {
+        const hut = nearestHutWithLogs(w, rx, ry);
+        const saw = nearest(ofKind(w, 'sawmill'), rx, ry, (b) => !b.busy && !b.done);
+        if (hut && saw && hut.logs > 0) {
+          hut.logs--;
+          s.carry = 'log';
+          const adj = adjacentTo(w.grid, saw.cells);
+          if (adj) setPathTo(w, s, adj.x, adj.y);
+          s.to = { x: saw.cells[0].x, y: saw.cells[0].y };
+          s.state = 'toDrop';
+        } else s.state = 'idle';
+      } else if (s.building === 'warehouse') {
+        const saw = nearest(ofKind(w, 'sawmill'), rx, ry, (b) => b.done);
+        const wh = nearest(ofKind(w, 'warehouse'), rx, ry);
+        if (saw && wh) {
+          saw.done = false;
+          s.carry = 'plank';
+          const adj = adjacentTo(w.grid, wh.cells);
+          if (adj) setPathTo(w, s, adj.x, adj.y);
+          s.to = { x: wh.cells[0].x, y: wh.cells[0].y };
+          s.state = 'toDrop';
+        } else s.state = 'idle';
+      } else s.state = 'idle';
+    }
+    return;
+  }
+  if (s.state === 'toDrop') {
+    if (moveAlong(s, dt)) {
+      if (s.building === 'sawmill' && s.carry === 'log') {
+        const saw = nearest(ofKind(w, 'sawmill'), rx, ry, (b) => !b.busy && !b.done);
+        if (saw) {
+          saw.busy = true;
+          saw.timer = balance.times.sawPlank;
+          s.carry = null;
+        } else {
+          const hut = nearest(ofKind(w, 'hut'), rx, ry);
+          if (hut) hut.logs++;
+          s.carry = null;
+        }
+      } else if (s.building === 'warehouse' && s.carry === 'plank') {
+        const wh = nearest(ofKind(w, 'warehouse'), rx, ry);
+        if (wh) {
+          wh.planks++;
+          s.carry = null;
+          if (totalPlanks(w) >= balance.winPlanks) w.won = true;
+        } else {
+          const saw = nearest(ofKind(w, 'sawmill'), rx, ry);
+          if (saw) saw.done = true;
+          s.carry = null;
+        }
+      } else {
         s.carry = null;
       }
       s.state = 'idle';
@@ -241,73 +445,21 @@ function tickBuilder(w: World, s: Settler, dt: number): void {
   }
 }
 
-function tickCarrier(w: World, s: Settler, dt: number): void {
-  const goPickup = (b: Building, cargo: 'sawmill' | 'warehouse') => {
-    const adj = adjacentTo(w.grid, b.cells);
-    if (!adj) return;
-    setPathTo(w, s, adj.x, adj.y);
-    const c = b.cells[0];
-    s.from = { x: c.x, y: c.y };
-    const dst = cargo === 'sawmill' ? w.sawmill : w.warehouse;
-    const dc = dst.cells[0];
-    s.to = { x: dc.x, y: dc.y };
-    s.building = cargo;
-    s.state = 'toPickup';
-  };
-  if (s.state === 'idle') {
-    // Prioridad: llevar tablón listo al almacén (construido); si no, tronco al aserradero.
-    // Todo exige edificios construidos.
-    if (w.sawmill.built && w.sawmill.done && w.warehouse.built) {
-      goPickup(w.sawmill, 'warehouse');
-      return;
-    }
-    if (w.sawmill.built && w.hut.logs > 0 && !w.sawmill.busy && !w.sawmill.done) {
-      goPickup(w.hut, 'sawmill');
-    }
-    return;
-  }
-  if (s.state === 'toPickup') {
-    if (moveAlong(s, dt)) {
-      if (s.building === 'sawmill' && w.hut.logs > 0) {
-        w.hut.logs--;
-        s.carry = 'log';
-        const adj = adjacentTo(w.grid, w.sawmill.cells);
-        if (adj) setPathTo(w, s, adj.x, adj.y);
-        s.state = 'toDrop';
-      } else if (s.building === 'warehouse' && w.sawmill.done) {
-        w.sawmill.done = false;
-        s.carry = 'plank';
-        const adj = adjacentTo(w.grid, w.warehouse.cells);
-        if (adj) setPathTo(w, s, adj.x, adj.y);
-        s.state = 'toDrop';
-      } else {
-        s.state = 'idle';
-      }
-    }
-    return;
-  }
-  if (s.state === 'toDrop') {
-    if (moveAlong(s, dt)) {
-      if (s.building === 'sawmill' && s.carry === 'log') {
-        if (w.sawmill.built) {
-          w.sawmill.busy = true;
-          w.sawmill.timer = balance.times.sawPlank;
-          s.carry = null;
-        } else {
-          w.hut.logs++;
-          s.carry = null;
-        }
-      } else if (s.building === 'warehouse' && s.carry === 'plank') {
-        if (w.warehouse.built) {
-          w.warehouse.planks++;
-          s.carry = null;
-          if (w.warehouse.planks >= balance.winPlanks) w.won = true;
-        } else {
-          w.sawmill.done = true;
-          s.carry = null;
-        }
-      }
-      s.state = 'idle';
+function finishConstruction(w: World, b: Building): void {
+  b.constructing = false;
+  b.built = true;
+  if (b.kind === 'hut') {
+    // Nueva cabaña = nuevo leñador (con tope).
+    const jacks = w.settlers.filter((s) => s.job === 'lumberjack').length;
+    if (jacks < balance.maxLumberjacks) {
+      const adj = adjacentTo(w.grid, b.cells);
+      const id = Math.max(...w.settlers.map((s) => s.id)) + 1;
+      const s: Settler = {
+        id, job: 'lumberjack', x: adj ? adj.x : b.cells[0].x, y: adj ? adj.y : b.cells[0].y,
+        path: [], state: 'idle', timer: 0, carry: null,
+        from: null, to: null, building: null, siteId: null,
+      };
+      w.settlers.push(s);
     }
   }
 }
@@ -323,25 +475,21 @@ export function tick(w: World, dt: number): void {
       w.stumps.splice(i, 1);
     }
   }
-  for (const b of [w.sawmill, w.warehouse]) {
+  for (const b of w.buildings) {
     if (b.constructing) {
       b.buildTimer -= dt;
-      if (b.buildTimer <= 0) {
-        b.constructing = false;
-        b.built = true;
-      }
+      if (b.buildTimer <= 0) finishConstruction(w, b);
     }
-  }
-  if (w.sawmill.busy) {
-    w.sawmill.timer -= dt;
-    if (w.sawmill.timer <= 0) {
-      w.sawmill.busy = false;
-      w.sawmill.done = true;
+    if (b.kind === 'sawmill' && b.busy) {
+      b.timer -= dt;
+      if (b.timer <= 0) {
+        b.busy = false;
+        b.done = true;
+      }
     }
   }
   for (const s of w.settlers) {
     if (s.job === 'lumberjack') tickLumberjack(w, s, dt);
-    // El colono 3 es constructor mientras haya obra (incluye terminar su reparto).
     else if (s.id === 3 && (siteNeedingLogs(w) || s.state === 'bPickup' || s.state === 'bDrop')) tickBuilder(w, s, dt);
     else tickCarrier(w, s, dt);
   }

@@ -1,37 +1,44 @@
-// T009: guardado local. Serializa el World a JSON plano (sin Phaser).
+// T009: guardado local. Serializa el World a JSON plano (sin Phaser). v2 = edificios[].
 import type { Terrain } from './grid';
-import type { World, Building } from './economy';
+import type { World, Building, BuildKind } from './economy';
 
-export const SAVE_KEY = 'settlers-ramos-save-v1';
+export const SAVE_KEY = 'settlers-ramos-save-v2';
+
+interface SaveBuilding {
+  id: number; kind: BuildKind; cells: Array<{ x: number; y: number }>;
+  logs: number; busy: boolean; timer: number; done: boolean; planks: number;
+  built: boolean; gotLogs: number; needLogs: number;
+  constructing: boolean; buildTimer: number;
+}
 
 interface SaveData {
-  v: 1;
+  v: 2;
   w: number;
   h: number;
   terrain: Terrain[];
-  buildings: Record<'hut' | 'sawmill' | 'warehouse', {
-    logs: number; busy: boolean; timer: number; done: boolean; planks: number;
-    built: boolean; gotLogs: number; constructing: boolean; buildTimer: number;
-  }>;
+  buildings: SaveBuilding[];
   settlers: Array<{
     id: number; job: 'lumberjack' | 'carrier'; x: number; y: number;
     path: Array<{ x: number; y: number }>;
     state: string; timer: number; carry: 'log' | 'plank' | null;
     from: { x: number; y: number } | null; to: { x: number; y: number } | null;
-    building: 'sawmill' | 'warehouse' | null;
+    building: 'sawmill' | 'warehouse' | null; siteId: number | null;
   }>;
   stumps: Array<{ x: number; y: number; age: number }>;
   time: number;
   won: boolean;
+  nextId: number;
 }
 
 export function serialize(w: World): string {
-  const b = (bd: Building) => ({
+  const b = (bd: Building): SaveBuilding => ({
+    id: bd.id, kind: bd.kind, cells: bd.cells.map((c) => ({ x: c.x, y: c.y })),
     logs: bd.logs, busy: bd.busy, timer: bd.timer, done: bd.done, planks: bd.planks,
-    built: bd.built, gotLogs: bd.gotLogs, constructing: bd.constructing, buildTimer: bd.buildTimer,
+    built: bd.built, gotLogs: bd.gotLogs, needLogs: bd.needLogs,
+    constructing: bd.constructing, buildTimer: bd.buildTimer,
   });
   const data: SaveData = {
-    v: 1,
+    v: 2,
     w: w.grid.w,
     h: w.grid.h,
     terrain: Array.from({ length: w.grid.w * w.grid.h }, (_, i) => {
@@ -39,16 +46,17 @@ export function serialize(w: World): string {
       const y = Math.floor(i / w.grid.w);
       return w.grid.get(x, y).terrain;
     }),
-    buildings: { hut: b(w.hut), sawmill: b(w.sawmill), warehouse: b(w.warehouse) },
+    buildings: w.buildings.map(b),
     settlers: w.settlers.map((s) => ({
       id: s.id, job: s.job, x: s.x, y: s.y,
       path: s.path.map((t) => ({ x: t.x, y: t.y })),
       state: s.state, timer: s.timer,
-      carry: s.carry, from: s.from, to: s.to, building: s.building,
+      carry: s.carry, from: s.from, to: s.to, building: s.building, siteId: s.siteId,
     })),
     stumps: w.stumps.map((s) => ({ x: s.x, y: s.y, age: s.age })),
     time: w.time,
     won: w.won,
+    nextId: w.nextId,
   };
   return JSON.stringify(data);
 }
@@ -56,32 +64,35 @@ export function serialize(w: World): string {
 export function deserialize(json: string, createWorld: () => World): World | null {
   try {
     const data = JSON.parse(json) as SaveData;
-    if (data.v !== 1 || data.w !== 15 || data.h !== 8) return null;
+    if (data.v !== 2 || data.w !== 15 || data.h !== 8) return null;
     const w = createWorld();
     for (let y = 0; y < data.h; y++) {
       for (let x = 0; x < data.w; x++) {
-        w.grid.setTerrain(x, y, data.terrain[y * data.w + x]);
+        const cell = w.grid.get(x, y);
+        cell.terrain = data.terrain[y * data.w + x];
+        cell.building = null;
       }
     }
-    // Limpia huellas por defecto y remarca (createWorld ya las marcó igual).
-    const apply = (bd: Building, kind: 'hut' | 'sawmill' | 'warehouse') => {
-      const s = data.buildings[kind];
-      bd.logs = s.logs; bd.busy = s.busy; bd.timer = s.timer; bd.done = s.done;
-      bd.planks = s.planks; bd.built = s.built; bd.gotLogs = s.gotLogs;
-      bd.constructing = s.constructing; bd.buildTimer = s.buildTimer;
-    };
-    apply(w.hut, 'hut');
-    apply(w.sawmill, 'sawmill');
-    apply(w.warehouse, 'warehouse');
+    w.buildings = data.buildings.map((s): Building => ({
+      id: s.id, kind: s.kind, cells: s.cells.map((c) => ({ x: c.x, y: c.y })),
+      logs: s.logs, busy: s.busy, timer: s.timer, done: s.done, planks: s.planks,
+      built: s.built, gotLogs: s.gotLogs, needLogs: s.needLogs,
+      constructing: s.constructing, buildTimer: s.buildTimer,
+    }));
+    for (const b of w.buildings) {
+      for (const c of b.cells) w.grid.get(c.x, c.y).building = b.id;
+    }
     w.settlers = data.settlers.map((s) => ({
       id: s.id, job: s.job, x: s.x, y: s.y,
       path: s.path.map((t) => ({ x: t.x, y: t.y })),
       state: s.state,
-      timer: s.timer, carry: s.carry, from: s.from, to: s.to, building: s.building,
+      timer: s.timer, carry: s.carry, from: s.from, to: s.to,
+      building: s.building, siteId: s.siteId,
     }));
     w.stumps = data.stumps.map((s) => ({ x: s.x, y: s.y, age: s.age }));
     w.time = data.time;
     w.won = data.won;
+    w.nextId = data.nextId;
     return w;
   } catch {
     return null;

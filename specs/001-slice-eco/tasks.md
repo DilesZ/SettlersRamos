@@ -18,7 +18,9 @@
   victoria) + mute, puestos de territorio, panel de edificio clicable. 9/9 tests.
 - [x] Verificación real: `scripts/smoke.mjs` (Playwright+Edge: título, clic JUGAR,
   juego visible por varianza, 0 errores/404). Favicons inline. `npm run smoke`.
-- [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
+- [x] T006 Edificios del jugador: menú (cabaña 2🪵/sierra 4🪵/almacén 4🪵2🧱),
+  fantasma verde/rojo, territorio (radio 6), costes, constructor, cabaña nueva =
+  leñador nuevo (tope 6). Sim con edificios[] + stocks globales. 14/14 tests.
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
 - [ ] T009 Save/load localStorage + victoria 10 tablones

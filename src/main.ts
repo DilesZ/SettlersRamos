@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import './style.css';
-import { createDemoWorld, tick, World, BUILD_TIME } from './sim/economy';
+import {
+  createDemoWorld, tick, World, BUILD_TIME, Building, BuildKind,
+  footprintFor, placementError, placeBuilding, totalLogs, totalPlanks, ofKind,
+} from './sim/economy';
 import { saveGame, loadGame, hasSave, clearSave } from './sim/save';
 import { ATLAS_META } from './view/atlasMeta';
 
@@ -110,10 +113,12 @@ class GameScene extends Phaser.Scene {
   private treeBaseX = new Map<string, number>();
   private stumpSprites = new Map<string, Phaser.GameObjects.Image>();
   private chopKey: string | null = null;
-  private hutImg!: Phaser.GameObjects.Image;
-  private hutFrame = '';
-  private siteImgs = new Map<string, Phaser.GameObjects.Image>();
-  private siteBars = new Map<string, Phaser.GameObjects.Rectangle>();
+  private bldImgs = new Map<number, Phaser.GameObjects.Image>();
+  private bldBars = new Map<number, Phaser.GameObjects.Rectangle>();
+  private bldFrame = new Map<number, string>();
+  private placing: BuildKind | null = null;
+  private ghost: Phaser.GameObjects.Graphics | null = null;
+  private ghostCell: { x: number; y: number } | null = null;
   private flagImg!: Phaser.GameObjects.Image;
   private sawBar!: Phaser.GameObjects.Rectangle;
   private chopBar!: Phaser.GameObjects.Rectangle;
@@ -158,9 +163,9 @@ class GameScene extends Phaser.Scene {
   create(data: { fresh?: boolean }) {
     this.world = data.fresh === false ? (loadGame(createDemoWorld) ?? createDemoWorld()) : createDemoWorld();
     const w = this.world;
-    this.prevPlanks = w.warehouse.planks;
+    this.prevPlanks = totalPlanks(w);
     this.prevStumps = w.stumps.length;
-    this.prevBuilt = `${w.sawmill.built}${w.warehouse.built}`;
+    this.prevBuilt = w.buildings.filter((b) => b.built).map((b) => b.id).join(',');
     // Cámara RTS: isla entera visible + drag + rueda
     const cam = this.cameras.main;
     cam.setZoom(1.0);
@@ -169,12 +174,20 @@ class GameScene extends Phaser.Scene {
     let dragY = 0;
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { dragX = p.x; dragY = p.y; });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (p.isDown && !p.rightButtonDown()) {
+      if (this.placing) { this.updateGhost(p); }
+      else if (p.isDown && !p.rightButtonDown()) {
         cam.scrollX = Phaser.Math.Clamp(cam.scrollX - (p.x - dragX) / cam.zoom, -120, 340);
         cam.scrollY = Phaser.Math.Clamp(cam.scrollY - (p.y - dragY) / cam.zoom, -80, 220);
       }
       dragX = p.x; dragY = p.y;
     });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.placing) {
+        if (p.rightButtonDown()) this.cancelPlacing();
+        else this.tryPlace(p);
+      }
+    });
+    this.input.keyboard?.on('keydown-ESC', () => this.cancelPlacing());
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.8, 2.0));
     });
@@ -202,35 +215,23 @@ class GameScene extends Phaser.Scene {
       this.add.rectangle(sx, sy - 8, 4, 14, 0x6b4a26).setDepth((x + y) * 10 + 1);
       this.add.triangle(sx, sy - 18, 0, 6, 8, 6, 4, 0, 0xb33a2e).setDepth((x + y) * 10 + 1);
     }
-    // Edificios clicables
-    const hc = footprintCenter(w.hut.cells);
-    this.hutImg = this.put('hut', hc.x, hc.y, (hc.x + hc.y) * 10 + 3);
-    this.hutFrame = 'hut';
-    this.hutImg.setInteractive({ useHandCursor: true });
-    this.hutImg.on('pointerdown', () => this.hud().showPanel('Cabaña del leñador'));
-    for (const b of [w.sawmill, w.warehouse]) {
-      const c = footprintCenter(b.cells);
-      const frame = b.built ? (b.kind === 'sawmill' ? 'sawmill' : 'warehouse') : 'scaffold';
-      const img = this.put(frame, c.x, c.y, (c.x + c.y) * 10 + 3);
-      this.siteImgs.set(b.kind, img);
-      const p = iso(c.x, c.y);
-      const bar = this.add.rectangle(p.sx, p.sy - 84, 44, 5, 0xffd23f).setDepth(480);
-      bar.setVisible(!b.built);
-      this.siteBars.set(b.kind, bar);
-      img.setInteractive({ useHandCursor: true });
-      img.on('pointerdown', () => this.hud().showPanel(b.kind === 'sawmill' ? 'Sierra' : 'Almacén'));
-    }
+    // Edificios dinámicos (también los que coloque el jugador) + fantasma de obra
+    this.ghost = this.add.graphics().setDepth(470);
     const tag = (x: number, y: number, name: string) => {
       const { sx, sy } = iso(x, y);
       this.add.text(sx, sy + 26, name, {
         fontSize: '11px', color: '#fff', backgroundColor: '#00000077',
       }).setOrigin(0.5).setDepth(490);
     };
-    tag(hc.x, hc.y, 'LEÑADOR');
-    const sc0 = footprintCenter(w.sawmill.cells);
-    const wc0 = footprintCenter(w.warehouse.cells);
+    const firstSaw = w.buildings.find((b) => b.kind === 'sawmill');
+    const sc0 = footprintCenter(firstSaw ? firstSaw.cells : [{ x: 7, y: 6 }]);
+    tag(4.5, 6, 'LEÑADOR');
     tag(sc0.x, sc0.y, 'SIERRA');
-    tag(wc0.x, wc0.y, 'ALMACÉN');
+    const firstWh = w.buildings.find((b) => b.kind === 'warehouse');
+    if (firstWh) {
+      const wc = footprintCenter(firstWh.cells);
+      tag(wc.x, wc.y, 'ALMACÉN');
+    }
     this.flagImg = this.put('flag', 3.4, 6.1, 200);
     // Humo de la sierra
     const smoke = iso(sc0.x + 0.35, sc0.y - 0.15);
@@ -269,6 +270,129 @@ class GameScene extends Phaser.Scene {
 
   private hud(): HudScene {
     return this.scene.get('Hud') as unknown as HudScene;
+  }
+
+  // ---------- colocación T006 ----------
+
+  public startPlacing(kind: BuildKind): void {
+    this.cancelPlacing();
+    this.placing = kind;
+    this.hud().flashHint(
+      kind === 'hut' ? 'Cabaña (2🪵): elige solar en hierba · clic izq coloca · der/Esc cancela'
+      : kind === 'sawmill' ? 'Sierra (4🪵): elige solar en hierba · clic izq coloca · der/Esc cancela'
+      : 'Almacén (4🪵 2🧱): elige solar en hierba · clic izq coloca · der/Esc cancela',
+    );
+  }
+
+  public cancelPlacing(): void {
+    this.placing = null;
+    this.ghostCell = null;
+    this.ghost?.clear();
+  }
+
+  public get placingKind(): BuildKind | null {
+    return this.placing;
+  }
+
+  private screenToCell(p: Phaser.Input.Pointer): { x: number; y: number } {
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    const fx = (wp.x - OX) / (TW / 2);
+    const fy = (wp.y - OY) / (TH / 2);
+    return { x: Math.round((fx + fy) / 2), y: Math.round((fy - fx) / 2) };
+  }
+
+  private updateGhost(p: Phaser.Input.Pointer): void {
+    if (!this.placing || !this.ghost) return;
+    const cell = this.screenToCell(p);
+    this.ghostCell = cell;
+    const cells = footprintFor(this.placing, cell.x, cell.y);
+    const err = placementError(this.world, this.placing, cells);
+    this.ghost.clear();
+    this.ghost.lineStyle(2, err ? 0xff4444 : 0x7ddf64, 0.95);
+    this.ghost.fillStyle(err ? 0xff4444 : 0x7ddf64, 0.25);
+    for (const c of cells) {
+      const { sx, sy } = iso(c.x, c.y);
+      this.ghost.fillPoints([
+        new Phaser.Geom.Point(sx, sy - TH / 2), new Phaser.Geom.Point(sx + TW / 2, sy),
+        new Phaser.Geom.Point(sx, sy + TH / 2), new Phaser.Geom.Point(sx - TW / 2, sy),
+      ], true);
+      this.ghost.strokePoints([
+        new Phaser.Geom.Point(sx, sy - TH / 2), new Phaser.Geom.Point(sx + TW / 2, sy),
+        new Phaser.Geom.Point(sx, sy + TH / 2), new Phaser.Geom.Point(sx - TW / 2, sy),
+      ], true);
+    }
+    if (err) this.hud().flashHint(err);
+  }
+
+  private tryPlace(p: Phaser.Input.Pointer): void {
+    if (!this.placing) return;
+    const cell = this.screenToCell(p);
+    const cells = footprintFor(this.placing, cell.x, cell.y);
+    const err = placementError(this.world, this.placing, cells);
+    if (err) {
+      this.hud().flashHint(err);
+      this.sfx('sfx-click', 0.4);
+      return;
+    }
+    const b = placeBuilding(this.world, this.placing, cell);
+    if (!b) {
+      this.hud().flashHint('Faltan recursos (mira el stock)');
+      this.sfx('sfx-click', 0.4);
+      return;
+    }
+    this.sfx('sfx-thud', 0.7);
+    const c = footprintCenter(b.cells);
+    const pt = iso(c.x, c.y);
+    this.burst(pt.sx, pt.sy - 30, 0xdddddd, 8);
+    this.cancelPlacing();
+  }
+
+  private buildingFrame(b: Building): string {
+    if (!b.built) return 'scaffold';
+    if (b.kind === 'hut') return b.logs >= 3 ? 'hut_logs2' : b.logs >= 1 ? 'hut_logs1' : 'hut';
+    return b.kind;
+  }
+
+  /** Crea/actualiza sprites de edificios (incluye obras del jugador y nuevos colonos). */
+  private syncActors(): void {
+    const w = this.world;
+    for (const b of w.buildings) {
+      const c = footprintCenter(b.cells);
+      const depth = (c.x + c.y) * 10 + 3;
+      let img = this.bldImgs.get(b.id);
+      const want = this.buildingFrame(b);
+      if (!img) {
+        img = this.put(want, c.x, c.y, depth);
+        img.setInteractive({ useHandCursor: true });
+        const id = b.id;
+        img.on('pointerdown', () => this.hud().showPanelById(id));
+        this.bldImgs.set(b.id, img);
+        this.bldFrame.set(b.id, want);
+        const p = iso(c.x, c.y);
+        const bar = this.add.rectangle(p.sx, p.sy - 84, 44, 5, 0xffd23f).setDepth(480);
+        this.bldBars.set(b.id, bar);
+      } else if (this.bldFrame.get(b.id) !== want) {
+        img.setTexture('uh', want);
+        this.bldFrame.set(b.id, want);
+      }
+      const bar = this.bldBars.get(b.id)!;
+      if (b.built) bar.setVisible(false);
+      else {
+        const frac = b.constructing ? 1 - b.buildTimer / BUILD_TIME : (b.gotLogs / Math.max(1, b.needLogs)) * 0.5;
+        bar.setVisible(true);
+        bar.setScale(Math.max(0.05, frac), 1);
+      }
+    }
+    for (const s of w.settlers) {
+      if (!this.settlerSprites.has(s.id)) {
+        const { sx, sy } = iso(s.x, s.y);
+        const m = ATLAS_META['lj_idle_r135'];
+        const img = this.add.image(sx, sy, 'uh', 'lj_idle_r135')
+          .setOrigin(m.ax / m.w, m.ay / m.h);
+        this.settlerSprites.set(s.id, img);
+        this.settlerRot.set(s.id, 'r135');
+      }
+    }
   }
 
   update(time: number, delta: number) {
@@ -310,7 +434,7 @@ class GameScene extends Phaser.Scene {
     for (const [k, img] of this.stumpSprites) {
       if (!seenStumps.has(k)) { img.destroy(); this.stumpSprites.delete(k); }
     }
-    // Eventos: tala (tocón nuevo), tablón, obra terminada
+    // Eventos: tala (tocón nuevo), tablón, obra terminada (cualquier edificio)
     if (w.stumps.length > this.prevStumps) {
       const st = w.stumps[w.stumps.length - 1];
       const p = iso(st.x, st.y);
@@ -318,44 +442,29 @@ class GameScene extends Phaser.Scene {
       this.sfx('sfx-thud', 0.8);
     }
     this.prevStumps = w.stumps.length;
-    if (w.warehouse.planks > this.prevPlanks) {
-      const wc = footprintCenter(w.warehouse.cells);
+    const planksNow = totalPlanks(w);
+    if (planksNow > this.prevPlanks) {
+      const whs = ofKind(w, 'warehouse');
+      const wc = footprintCenter(whs.length > 0 ? whs[whs.length - 1].cells : [{ x: 10, y: 6 }]);
       const p = iso(wc.x, wc.y);
       this.burst(p.sx, p.sy - 40, 0xffd23f, 6);
       this.sfx('sfx-plank', 0.8);
     }
-    this.prevPlanks = w.warehouse.planks;
-    const builtKey = `${w.sawmill.built}${w.warehouse.built}`;
-    if (this.prevBuilt && builtKey !== this.prevBuilt) {
+    this.prevPlanks = planksNow;
+    const builtNow = w.buildings.filter((b) => b.built).map((b) => b.id).join(',');
+    if (this.prevBuilt && builtNow !== this.prevBuilt) {
       this.sfx('sfx-thud', 1);
-      const b = w.warehouse.built && this.prevBuilt[1] === 'f' ? w.warehouse : w.sawmill;
-      const c = footprintCenter(b.cells);
-      const p = iso(c.x, c.y);
-      this.burst(p.sx, p.sy - 40, 0xdddddd, 10);
-    }
-    this.prevBuilt = builtKey;
-    // Obras
-    for (const b of [w.sawmill, w.warehouse]) {
-      const img = this.siteImgs.get(b.kind);
-      const bar = this.siteBars.get(b.kind);
-      if (!img || !bar) continue;
-      if (b.built) {
-        const frame = b.kind === 'sawmill' ? 'sawmill' : 'warehouse';
-        if (img.texture.key !== 'uh' || img.frame.name !== frame) img.setTexture('uh', frame);
-        bar.setVisible(false);
-      } else {
-        const total = b.constructing ? 1 : b.gotLogs / b.needLogs;
-        const frac = b.constructing ? 1 - b.buildTimer / BUILD_TIME : total * 0.5;
-        bar.setVisible(true);
-        bar.setScale(Math.max(0.05, frac), 1);
+      const prev = new Set(this.prevBuilt.split(',').filter(Boolean).map(Number));
+      const nb = w.buildings.find((b) => b.built && !prev.has(b.id));
+      if (nb) {
+        const c = footprintCenter(nb.cells);
+        const p = iso(c.x, c.y);
+        this.burst(p.sx, p.sy - 40, 0xdddddd, 10);
       }
     }
-    // Cabaña muestra stock
-    const wantHut = w.hut.logs >= 3 ? 'hut_logs2' : w.hut.logs >= 1 ? 'hut_logs1' : 'hut';
-    if (wantHut !== this.hutFrame) {
-      this.hutFrame = wantHut;
-      this.hutImg.setTexture('uh', wantHut);
-    }
+    this.prevBuilt = builtNow;
+    // Edificios + colonos nuevos
+    this.syncActors();
     // Leñador: temblor + sonido de hacha
     const jack = w.settlers[0];
     const newChopKey = jack.state === 'chopping' && jack.to ? `${jack.to.x},${jack.to.y}` : null;
@@ -407,12 +516,13 @@ class GameScene extends Phaser.Scene {
       this.chopBar.setPosition(p.sx, p.sy - 66);
       this.chopBar.setScale(Math.max(0.05, jack.timer / 8), 1);
     } else this.chopBar.setVisible(false);
-    if (w.sawmill.built && w.sawmill.busy) {
-      const sc = footprintCenter(w.sawmill.cells);
+    const busySaw = w.buildings.find((b) => b.kind === 'sawmill' && b.built && b.busy);
+    if (busySaw) {
+      const sc = footprintCenter(busySaw.cells);
       const p = iso(sc.x, sc.y);
       this.sawBar.setVisible(true);
       this.sawBar.setPosition(p.sx, p.sy - 78);
-      this.sawBar.setScale(Math.max(0.05, w.sawmill.timer / 10), 1);
+      this.sawBar.setScale(Math.max(0.05, busySaw.timer / 10), 1);
     } else this.sawBar.setVisible(false);
     // Autoguardado cada 10 s
     this.saveTimer += delta;
@@ -431,7 +541,7 @@ class HudScene extends Phaser.Scene {
   private panelTitle!: Phaser.GameObjects.Text;
   private panelBody!: Phaser.GameObjects.Text;
   private panelTimer = 0;
-  private panelKind = '';
+  private panelId = 0;
   private winText!: Phaser.GameObjects.Text;
   private dayOverlay!: Phaser.GameObjects.Rectangle;
   private muteBtn!: Phaser.GameObjects.Text;
@@ -442,35 +552,47 @@ class HudScene extends Phaser.Scene {
     return this.scene.get('Game') as unknown as GameScene;
   }
 
-  public showPanel(title: string): void {
-    this.panelTitle.setText(title);
-    this.panelKind = title;
+  public showPanelById(id: number): void {
+    const w = this.gameScene().world;
+    const b = w.buildings.find((x) => x.id === id);
+    if (!b) return;
+    const names = { hut: 'Cabaña del leñador', sawmill: 'Sierra', warehouse: 'Almacén' } as const;
+    this.panelTitle.setText(`${names[b.kind]} #${b.id}`);
+    this.panelId = id;
     this.panel.setVisible(true);
     this.panelTimer = 8;
     this.gameScene().sfx('sfx-click', 0.4);
+  }
+
+  public flashHint(msg: string): void {
+    this.panelTitle.setText('🔨 Construir');
+    this.panelBody.setText(msg);
+    this.panelId = -1;
+    this.panel.setVisible(true);
+    this.panelTimer = 4;
   }
 
   public syncMute(muted: boolean): void {
     this.muteBtn.setText(muted ? '🔇' : '🔊');
   }
 
-  private buildingInfo(kind: 'sawmill' | 'warehouse' | 'hut'): string {
+  private buildingInfo(id: number): string {
     const w = this.gameScene().world;
-    if (kind === 'hut') return `Troncos en stock: ${w.hut.logs}`;
-    const b = kind === 'sawmill' ? w.sawmill : w.warehouse;
+    const b = w.buildings.find((x) => x.id === id);
+    if (!b) return '';
+    if (b.kind === 'hut') return `Troncos en stock: ${b.logs}`;
     if (!b.built) {
       return b.constructing
         ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
         : `Solar: faltan ${b.needLogs - b.gotLogs} troncos`;
     }
-    if (kind === 'sawmill') {
-      return w.sawmill.busy ? 'Cortando tablón…' : w.sawmill.done ? 'Tablón listo para recoger' : 'Esperando troncos';
+    if (b.kind === 'sawmill') {
+      return b.busy ? 'Cortando tablón…' : b.done ? 'Tablón listo para recoger' : 'Esperando troncos';
     }
-    return `Tablones: ${w.warehouse.planks}/10`;
+    return `Tablones aquí: ${b.planks} (total ${totalPlanks(w)}/10)`;
   }
 
   create() {
-    document.title = 'HUDCREATE';
     const g = () => this.gameScene();
     // Overlay día/noche bajo el HUD
     this.dayOverlay = this.add.rectangle(0, 0, 960, 540, 0x0a1030, 0).setOrigin(0).setDepth(5);
@@ -490,6 +612,20 @@ class HudScene extends Phaser.Scene {
     btn(786, '❚❚', () => g().setSpeed(0));
     btn(826, '1×', () => g().setSpeed(1));
     btn(876, '2×', () => g().setSpeed(2));
+    // Menú construir (T006)
+    const bbtn = (x: number, label: string, kind: 'hut' | 'sawmill' | 'warehouse') => {
+      this.add.text(x, 508, label, {
+        fontSize: '13px', color: '#1a2b1a', backgroundColor: '#c8a86a', padding: { x: 8, y: 5 },
+      }).setDepth(11).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          const game = g();
+          if (game.placingKind === kind) game.cancelPlacing();
+          else game.startPlacing(kind);
+        });
+    };
+    bbtn(330, '🛖 Cabaña 2🪵', 'hut');
+    bbtn(470, '🔨 Sierra 4🪵', 'sawmill');
+    bbtn(600, '🏚 Almacén 4🪵2🧱', 'warehouse');
     // Minimapa clicable
     this.add.rectangle(828, 440, 124, 68, 0x000000, 0.55).setDepth(11);
     // Minimapa clicable (CanvasTexture: robusto en todos los renderers)
@@ -557,15 +693,10 @@ class HudScene extends Phaser.Scene {
     return { color: 0xe08070, alpha: 0.10 * (1 - k), icon: '🌅' };
   }
 
-  private hudErr = '';
-  private hudN = 0;
   update(_time: number, delta: number) {
     const game = this.gameScene();
     if (!game.world) return;
     const w = game.world;
-    try {
-    this.hudN++;
-    document.title = 'HUDN=' + this.hudN + ' t=' + w.time.toFixed(1) + ' err=' + this.hudErr;
     this.mmTimer += delta;
     if (this.mmTimer > 250) {
       this.mmTimer = 0;
@@ -574,12 +705,8 @@ class HudScene extends Phaser.Scene {
     if (this.panel.visible) {
       this.panelTimer -= delta / 1000;
       if (this.panelTimer <= 0) this.panel.setVisible(false);
-      else if (this.panelKind === 'Cabaña del leñador') {
-        this.panelBody.setText(`Troncos en stock: ${w.hut.logs}`);
-      } else if (this.panelKind === 'Sierra') {
-        this.panelBody.setText(this.buildingInfo('sawmill'));
-      } else if (this.panelKind === 'Almacén') {
-        this.panelBody.setText(this.buildingInfo('warehouse'));
+      else if (this.panelId > 0) {
+        this.panelBody.setText(this.buildingInfo(this.panelId));
       }
     }
     const mm = Math.floor(w.time / 60);
@@ -587,19 +714,18 @@ class HudScene extends Phaser.Scene {
     const dl = this.daylight(w.time);
     this.dayOverlay.setFillStyle(dl.color, dl.alpha);
     const spd = game.speed === 0 ? 'PAUSA' : `${game.speed}×`;
-    const obra = !w.sawmill.built ? `Obra sierra ${w.sawmill.gotLogs}/2`
-      : !w.warehouse.built ? `Obra almacén ${w.warehouse.gotLogs}/2` : 'Colonia lista';
+    const pending = w.buildings.filter((b) => !b.built);
+    const obra = pending.length > 0
+      ? `Obras: ${pending.length} (sierra ${ofKind(w, 'sawmill').filter((b) => b.built).length}·alm ${ofKind(w, 'warehouse').filter((b) => b.built).length})`
+      : 'Colonia lista';
+    const placing = game.placingKind ? ` · 🔨 ${game.placingKind}` : '';
     this.hud.setText(
-      `${dl.icon} ${mm}:${ss}   🪵 ${w.hut.logs}   🧱 ${w.warehouse.planks}/10   ${obra}   [${spd}]`,
+      `${dl.icon} ${mm}:${ss}   🪵 ${totalLogs(w)}   🧱 ${totalPlanks(w)}/10   ${obra}   [${spd}]${placing}`,
     );
     if (w.won && !this.winText.visible) {
       this.winText.setVisible(true);
       game.sfx('sfx-victory', 0.9);
       saveGame(w);
-    }
-    } catch (e) {
-      this.hudErr = String(e).substring(0, 120);
-      document.title = 'HUDERR=' + this.hudErr;
     }
   }
 }
