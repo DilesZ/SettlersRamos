@@ -8,12 +8,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "asset:check": "node scripts/check-assets.mjs"
+    "asset:check": "node scripts/check-assets.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "phaser": "^3.80.1"
   },
   "devDependencies": {
+    "playwright-core": "^1.63.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.8",
     "vitest": "^2.1.3"

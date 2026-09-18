@@ -16,6 +16,8 @@
 - [x] V3 juego: cámara RTS (zoom 1-2 + drag + minimapa clicable), suelo con tintes,
   partículas (tala/obra/tablón), SFX CC0 Kenney (hacha, tablón, obra, clic,
   victoria) + mute, puestos de territorio, panel de edificio clicable. 9/9 tests.
+- [x] Verificación real: `scripts/smoke.mjs` (Playwright+Edge: título, clic JUGAR,
+  juego visible por varianza, 0 errores/404). Favicons inline. `npm run smoke`.
 - [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
