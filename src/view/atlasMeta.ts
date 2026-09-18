@@ -18,6 +18,7 @@ export const ATLAS_META: Record<string, Anchor> = {
   hut_logs2: { ax: 65, ay: 127, w: 128, h: 128 },
   sawmill: { ax: 64, ay: 127, w: 128, h: 128 },
   warehouse: { ax: 108, ay: 166, w: 192, h: 192 },
+  quarry: { ax: 96, ay: 190, w: 192, h: 192 },
   lj_carry1_r0: { ax: 18, ay: 37, w: 32, h: 42 },
   lj_carry1_r135: { ax: 20, ay: 36, w: 32, h: 42 },
   lj_carry1_r180: { ax: 17, ay: 36, w: 32, h: 42 },

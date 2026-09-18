@@ -54,6 +54,7 @@ FILES = {
     "_hut_logs1": "buildings/pioneers/lumberjack_barrack/as_lumberjack_barrack0/logs_01/135/0.png",
     "_hut_logs2": "buildings/pioneers/lumberjack_barrack/as_lumberjack_barrack0/logs_02/135/0.png",
     "sawmill": "buildings/pioneers/weaver/as_weaver0/idle/135/0.png",
+    "quarry": "buildings/pioneers/clay_pit/as_clay_pit0/idle/135/0.png",
     "mushroom": "terrain/ambient/as_mushroom0/idle/135/000.png",
     "rock2": "terrain/ambient/as_rock1/idle/135/0.png",
 }
@@ -139,7 +140,7 @@ unit_frames = [s for s in sprites
 order = (["grass", "grass_var", "water", "road", "stump", "rock", "rock2",
           "mushroom", "flag", "scaffold",
           "pine", "leaf_tree", "hut", "hut_logs1", "hut_logs2",
-          "sawmill", "warehouse"] + sorted(unit_frames))
+          "sawmill", "warehouse", "quarry"] + sorted(unit_frames))
 W = 512
 x = y = row_h = 0
 frames: dict = {}
@@ -180,12 +181,12 @@ lines.append("};")
 META_TS.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 # --- tablero maestro ---
-board = Image.new("RGBA", (760, 420), (24, 22, 32, 255))
+board = Image.new("RGBA", (760, 560), (24, 22, 32, 255))
 d = ImageDraw.Draw(board)
 d.text((12, 8), "SETTLERSRAMOS UH-iso - Unknown Horizons (CC-BY-SA 3.0) + derivados", fill=(255, 255, 255, 255))
 d.text((12, 26), "rotacion 135 - contenido CC-BY-SA, ver CREDITS.md", fill=(180, 180, 180, 255))
 show = ["grass", "water", "road", "pine", "leaf_tree", "stump", "rock", "rock2",
-        "mushroom", "hut", "hut_logs2", "sawmill", "warehouse", "scaffold",
+        "mushroom", "hut", "hut_logs2", "sawmill", "warehouse", "quarry", "scaffold",
         "lj_idle_r135", "lj_walk1_r135", "lj_carry1_r135", "lj_work_r135",
         "lj_idle_r270", "lj_walk1_r90", "flag"]
 for i, s in enumerate(show):

@@ -37,7 +37,7 @@ function rotFor(dx: number, dy: number): string {
   return 'r45';
 }
 
-const SHROOMS: Array<[number, number]> = [[6, 3], [12, 5], [2, 6]];
+const SHROOMS: Array<[number, number]> = [[6, 3], [12, 5], [1, 6]];
 const POSTS: Array<[number, number]> = [[3, 2], [7, 1], [11, 2], [12, 5], [8, 7], [3, 7]];
 const GRASS_TINTS = [0xffffff, 0xf4ffea, 0xeafbdc, 0xfdffef];
 
@@ -116,6 +116,7 @@ class GameScene extends Phaser.Scene {
   private bldImgs = new Map<number, Phaser.GameObjects.Image>();
   private bldBars = new Map<number, Phaser.GameObjects.Rectangle>();
   private bldFrame = new Map<number, string>();
+  private bldTagged = new Set<number>();
   private placing: BuildKind | null = null;
   private ghost: Phaser.GameObjects.Graphics | null = null;
   private ghostCell: { x: number; y: number } | null = null;
@@ -227,21 +228,8 @@ class GameScene extends Phaser.Scene {
     }
     // Edificios dinámicos (también los que coloque el jugador) + fantasma de obra
     this.ghost = this.add.graphics().setDepth(470);
-    const tag = (x: number, y: number, name: string) => {
-      const { sx, sy } = iso(x, y);
-      this.add.text(sx, sy + 26, name, {
-        fontSize: '11px', color: '#fff', backgroundColor: '#00000077',
-      }).setOrigin(0.5).setDepth(490);
-    };
     const firstSaw = w.buildings.find((b) => b.kind === 'sawmill');
     const sc0 = footprintCenter(firstSaw ? firstSaw.cells : [{ x: 7, y: 6 }]);
-    tag(4.5, 6, 'LEÑADOR');
-    tag(sc0.x, sc0.y, 'SIERRA');
-    const firstWh = w.buildings.find((b) => b.kind === 'warehouse');
-    if (firstWh) {
-      const wc = footprintCenter(firstWh.cells);
-      tag(wc.x, wc.y, 'ALMACÉN');
-    }
     this.flagImg = this.put('flag', 3.4, 6.1, 200);
     // Humo de la sierra
     const smoke = iso(sc0.x + 0.35, sc0.y - 0.15);
@@ -287,11 +275,13 @@ class GameScene extends Phaser.Scene {
   public startPlacing(kind: BuildKind): void {
     this.cancelPlacing();
     this.placing = kind;
-    this.hud().flashHint(
-      kind === 'hut' ? 'Cabaña (2🪵): elige solar en hierba · clic izq coloca · der/Esc cancela'
-      : kind === 'sawmill' ? 'Sierra (4🪵): elige solar en hierba · clic izq coloca · der/Esc cancela'
-      : 'Almacén (4🪵 2🧱): elige solar en hierba · clic izq coloca · der/Esc cancela',
-    );
+    const hints = {
+      hut: 'Cabaña (2🪵): elige solar en hierba · clic izq coloca · der/Esc cancela',
+      sawmill: 'Sierra (4🪵): elige solar en hierba · clic izq coloca · der/Esc cancela',
+      warehouse: 'Almacén (4🪵 2🧱): elige solar en hierba · clic izq coloca · der/Esc cancela',
+      quarry: 'Cantera (4🪵): JUNTO A ROCA (≤2) · clic izq coloca · der/Esc cancela',
+    } as const;
+    this.hud().flashHint(hints[kind]);
   }
 
   public cancelPlacing(): void {
@@ -384,6 +374,14 @@ class GameScene extends Phaser.Scene {
       } else if (this.bldFrame.get(b.id) !== want) {
         img.setTexture('uh', want);
         this.bldFrame.set(b.id, want);
+      }
+      if (!this.bldTagged.has(b.id)) {
+        this.bldTagged.add(b.id);
+        const names = { hut: 'LEÑADOR', sawmill: 'SIERRA', warehouse: 'ALMACÉN', quarry: 'CANTERA' } as const;
+        const p = iso(c.x, c.y);
+        this.add.text(p.sx, p.sy + 26, names[b.kind], {
+          fontSize: '11px', color: '#fff', backgroundColor: '#00000077',
+        }).setOrigin(0.5).setDepth(490);
       }
       const bar = this.bldBars.get(b.id)!;
       if (b.built) bar.setVisible(false);
@@ -518,6 +516,8 @@ class GameScene extends Phaser.Scene {
       img.setTexture('uh', frame);
       img.setPosition(sx, sy);
       img.setDepth((s.x + s.y) * 10 + 4);
+      if (s.job === 'mason') img.setTint(0xb9c2cc);
+      else img.clearTint();
     }
     this.flagImg.setScale(1 + Math.sin(time * 0.004) * 0.05, 1);
     if (jack.state === 'chopping' && jack.to) {
@@ -567,7 +567,7 @@ class HudScene extends Phaser.Scene {
     const w = this.gameScene().world;
     const b = w.buildings.find((x) => x.id === id);
     if (!b) return;
-    const names = { hut: 'Cabaña del leñador', sawmill: 'Sierra', warehouse: 'Almacén' } as const;
+    const names = { hut: 'Cabaña del leñador', sawmill: 'Sierra', warehouse: 'Almacén', quarry: 'Cantera' } as const;
     this.panelTitle.setText(`${names[b.kind]} #${b.id}`);
     this.panelId = id;
     this.panel.setVisible(true);
@@ -592,6 +592,14 @@ class HudScene extends Phaser.Scene {
     const b = w.buildings.find((x) => x.id === id);
     if (!b) return '';
     if (b.kind === 'hut') return `Troncos en stock: ${b.logs}`;
+    if (b.kind === 'quarry') {
+      if (!b.built) {
+        return b.constructing
+          ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
+          : `Solar: faltan ${b.needLogs - b.gotLogs} troncos`;
+      }
+      return `En marcha · piedra total: ${this.gameScene().world.stone}`;
+    }
     if (!b.built) {
       return b.constructing
         ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
@@ -624,7 +632,7 @@ class HudScene extends Phaser.Scene {
     btn(826, '1×', () => g().setSpeed(1));
     btn(876, '2×', () => g().setSpeed(2));
     // Menú construir (T006)
-    const bbtn = (x: number, label: string, kind: 'hut' | 'sawmill' | 'warehouse') => {
+    const bbtn = (x: number, label: string, kind: BuildKind) => {
       this.add.text(x, 508, label, {
         fontSize: '13px', color: '#1a2b1a', backgroundColor: '#c8a86a', padding: { x: 8, y: 5 },
       }).setDepth(11).setInteractive({ useHandCursor: true })
@@ -637,6 +645,7 @@ class HudScene extends Phaser.Scene {
     bbtn(330, '🛖 Cabaña 2🪵', 'hut');
     bbtn(470, '🔨 Sierra 4🪵', 'sawmill');
     bbtn(600, '🏚 Almacén 4🪵2🧱', 'warehouse');
+    bbtn(740, '⛏ Cantera 4🪵', 'quarry');
     // Minimapa clicable
     this.add.rectangle(828, 440, 124, 68, 0x000000, 0.55).setDepth(11);
     // Minimapa clicable (CanvasTexture: robusto en todos los renderers)
@@ -742,7 +751,7 @@ class HudScene extends Phaser.Scene {
       : 'Colonia lista';
     const placing = game.placingKind ? ` · 🔨 ${game.placingKind}` : '';
     this.hud.setText(
-      `${dl.icon} ${mm}:${ss}   🪵 ${totalLogs(w)}   🧱 ${totalPlanks(w)}/10   ${obra}   [${spd}]${placing}`,
+      `${dl.icon} ${mm}:${ss}   🪵 ${totalLogs(w)}   🧱 ${totalPlanks(w)}/10   🪨 ${w.stone}   ${obra}   [${spd}]${placing}`,
     );
     if (w.won && !this.winText.visible) {
       this.winText.setVisible(true);

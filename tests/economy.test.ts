@@ -53,23 +53,55 @@ describe('Economía', () => {
 
   it('Colocar sin recursos se rechaza y con recursos crea la obra', () => {
     const w = createDemoWorld();
-    expect(placeBuilding(w, 'sawmill', { x: 6, y: 2 })).toBeNull(); // 0 troncos
+    expect(placeBuilding(w, 'sawmill', { x: 5, y: 2 })).toBeNull(); // 0 troncos
     hut(w).logs = 4;
-    const b = placeBuilding(w, 'sawmill', { x: 6, y: 2 });
+    w.stone = 2; // la 2ª sierra exige piedra
+    const b = placeBuilding(w, 'sawmill', { x: 5, y: 2 });
     expect(b).not.toBeNull();
     expect(b!.built).toBe(false);
     expect(hut(w).logs).toBe(0); // coste cobrado
+    expect(w.stone).toBe(0);
     expect(ofKind(w, 'sawmill', false).length).toBe(2);
   });
 
   it('La segunda sierra produce tablones', () => {
     const w = createDemoWorld();
     hut(w).logs = 4;
-    const b = placeBuilding(w, 'sawmill', { x: 6, y: 2 });
+    w.stone = 2;
+    const b = placeBuilding(w, 'sawmill', { x: 5, y: 2 });
     expect(b).not.toBeNull();
     for (let i = 0; i < 120000 && !b!.built; i++) tick(w, 0.5);
     expect(b!.built).toBe(true);
     for (let i = 0; i < 40000 && totalPlanks(w) === 0; i++) tick(w, 0.5);
     expect(totalPlanks(w)).toBeGreaterThan(0);
+  });
+
+  it('La cantera exige roca cerca', () => {
+    const w = createDemoWorld();
+    hut(w).logs = 4;
+    expect(placeBuilding(w, 'quarry', { x: 3, y: 3 })).toBeNull(); // hierba sin roca
+    expect(placementError(w, 'quarry', [{ x: 3, y: 3 }, { x: 4, y: 3 }])).toBe('Lejos de la roca');
+    const q = placeBuilding(w, 'quarry', { x: 0, y: 5 }); // junto a roca (2,6)
+    expect(q).not.toBeNull();
+    expect(hut(w).logs).toBe(0); // 4 troncos cobrados
+  });
+
+  it('El cantero produce piedra y la 2ª sierra la exige', () => {
+    const w = createDemoWorld();
+    hut(w).logs = 4;
+    const q = placeBuilding(w, 'quarry', { x: 0, y: 5 });
+    expect(q).not.toBeNull();
+    for (let i = 0; i < 120000 && !q!.built; i++) tick(w, 0.5);
+    expect(q!.built).toBe(true);
+    expect(w.settlers.some((s) => s.job === 'mason')).toBe(true);
+    for (let i = 0; i < 60000 && w.stone === 0; i++) tick(w, 0.5);
+    expect(w.stone).toBeGreaterThan(0);
+    // 2ª sierra sin piedra se rechaza, con piedra se acepta
+    hut(w).logs = 4;
+    w.stone = 0;
+    expect(placeBuilding(w, 'sawmill', { x: 6, y: 2 })).toBeNull();
+    w.stone = 2;
+    expect(placeBuilding(w, 'sawmill', { x: 5, y: 2 })).not.toBeNull();
+    expect(w.stone).toBe(0);
   });
 });

@@ -10,7 +10,7 @@ colaboradores (entre otros devviktoria, TheFunnySide). Rotación usada: 135 (SE)
 plank (=impactPlank_medium_000), victory (=jingles_PIZZI05 pizzicato).
 Fuentes y licencias en `assets/vendor/kenney-audio/`.
 
-Vendorizado en `assets/vendor/unknown-horizons/` (24 PNG + `CC-BY-SA.txt` +
+Vendorizado en `assets/vendor/unknown-horizons/` (25 PNG + `CC-BY-SA.txt` +
 `SOURCE.txt`). Solo esos ficheros; el resto del pack no se distribuye aquí.
 
 Derivados de este repo (compartidos bajo **CC-BY-SA 3.0** como exige la licencia):

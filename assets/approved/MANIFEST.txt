@@ -87,6 +87,7 @@ lj_work_r45
 lj_work_r90
 mushroom
 pine
+quarry
 road
 rock
 rock2

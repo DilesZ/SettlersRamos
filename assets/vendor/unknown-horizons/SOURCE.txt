@@ -1,4 +1,4 @@
 Arte: Unknown Horizons (unknown-horizons/unknown-horizons + gfx), contenido mayormente CC-BY-SA 3.0 (ver unknown-horizons.org y doc/LICENSE del proyecto original).
 Autores: equipo UH y colaboradores (devviktoria, TheFunnySide, etc.).
-Rotacion usada: 135 (vista SE). Solo se vendorizan los 24 PNG listados en scripts/curate-uh.py + CC-BY-SA.txt.
+Rotacion usada: 135 (vista SE). Solo se vendorizan los 25 PNG listados en scripts/curate-uh.py + CC-BY-SA.txt.
 Derivados (flag, composites hut_logs, anclas): se comparten bajo CC-BY-SA 3.0 (ver assets/approved/CREDITS.md).

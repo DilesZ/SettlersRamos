@@ -7,10 +7,13 @@
   "costs": {
     "hut": { "logs": 2, "planks": 0 },
     "sawmill": { "logs": 4, "planks": 0 },
-    "warehouse": { "logs": 4, "planks": 2 }
+    "warehouse": { "logs": 4, "planks": 2 },
+    "quarry": { "logs": 4, "planks": 0 }
   },
+  "extraStone": 2,
   "needLogsInitial": 2,
   "buildTime": 30,
   "territoryRadius": 6,
-  "maxLumberjacks": 6
+  "maxLumberjacks": 6,
+  "maxMasons": 4
 }

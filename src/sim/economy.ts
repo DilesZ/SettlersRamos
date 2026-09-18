@@ -4,12 +4,12 @@ import { Grid } from './grid';
 import { astar, Tile } from './astar';
 import balance from '../data/balance.json';
 
-export type Carry = 'log' | 'plank' | null;
-export type BuildKind = 'hut' | 'sawmill' | 'warehouse';
+export type Carry = 'log' | 'plank' | 'stone' | null;
+export type BuildKind = 'hut' | 'sawmill' | 'warehouse' | 'quarry';
 
 export interface Settler {
   id: number;
-  job: 'lumberjack' | 'carrier';
+  job: 'lumberjack' | 'carrier' | 'mason';
   x: number; // posición en celdas (float)
   y: number;
   path: Tile[];
@@ -45,6 +45,7 @@ export interface World {
   settlers: Settler[];
   buildings: Building[];
   stumps: Stump[];
+  stone: number; // stock global de piedra
   time: number;
   won: boolean;
   nextId: number;
@@ -58,6 +59,7 @@ const SHAPES: Record<BuildKind, Array<[number, number]>> = {
   hut: [[0, 0], [1, 0]],
   sawmill: [[0, 0], [1, 0]],
   warehouse: [[0, 0], [1, 0], [2, 0]],
+  quarry: [[0, 0], [1, 0]],
 };
 
 function adjacentFree(grid: Grid, tx: number, ty: number): Tile | null {
@@ -77,8 +79,7 @@ export function adjacentTo(grid: Grid, cells: Tile[]): Tile | null {
   return null;
 }
 
-function nearestForest(w: World, fx: number, fy: number): Tile | null {
-  let best: Tile | null = null;
+function nearestForest(w: World, fx: number, fy: number): Tile | null {  let best: Tile | null = null;
   let bd = Infinity;
   for (let y = 0; y < w.grid.h; y++) {
     for (let x = 0; x < w.grid.w; x++) {
@@ -164,8 +165,11 @@ export function createDemoWorld(): World {
   for (const t of forest) grid.setTerrain(t.x, t.y, 'forest');
   grid.setTerrain(12, 1, 'rock');
   grid.setTerrain(13, 2, 'rock');
+  grid.setTerrain(7, 2, 'rock');
+  grid.setTerrain(11, 3, 'rock');
+  grid.setTerrain(2, 6, 'rock');
   for (const [x, y] of [[13, 6], [14, 6], [13, 7], [14, 7]]) grid.setTerrain(x, y, 'water');
-  const w: World = { grid, settlers: [], buildings: [], stumps: [], time: 0, won: false, nextId: 1 };
+  const w: World = { grid, settlers: [], buildings: [], stumps: [], stone: 0, time: 0, won: false, nextId: 1 };
   makeBuilding(w, 'hut', [{ x: 4, y: 6 }, { x: 5, y: 6 }], true, 0);
   makeBuilding(w, 'sawmill', [{ x: 7, y: 6 }, { x: 8, y: 6 }], false, balance.needLogsInitial);
   makeBuilding(w, 'warehouse', [{ x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }], false, balance.needLogsInitial);
@@ -205,6 +209,18 @@ export function placementError(w: World, kind: BuildKind, cells: Tile[]): string
     anchors.some((a) => Math.abs(a.x - c.x) + Math.abs(a.y - c.y) <= r),
   );
   if (!inside) return 'Fuera del territorio';
+  if (kind === 'quarry') {
+    let rock = false;
+    for (const c of cells) {
+      for (let y = 0; y < w.grid.h && !rock; y++) {
+        for (let x = 0; x < w.grid.w && !rock; x++) {
+          if (w.grid.get(x, y).terrain === 'rock'
+            && Math.abs(x - c.x) + Math.abs(y - c.y) <= 2) rock = true;
+        }
+      }
+    }
+    if (!rock) return 'Lejos de la roca';
+  }
   return null;
 }
 
@@ -216,9 +232,20 @@ export function totalPlanks(w: World): number {
   return ofKind(w, 'warehouse').reduce((a, b) => a + b.planks, 0);
 }
 
+export interface Cost { logs: number; planks: number; stone: number }
+
+/** Coste real: base + 2 de piedra para la 2ª unidad (y siguientes) salvo cabañas. */
+export function costOf(w: World, kind: BuildKind): Cost {
+  const base = (balance.costs as Record<BuildKind, { logs: number; planks: number }>)[kind];
+  const extra = kind !== 'hut' && ofKind(w, kind, false).length >= 1
+    ? (balance.extraStone as number)
+    : 0;
+  return { logs: base.logs, planks: base.planks, stone: extra };
+}
+
 function payCost(w: World, kind: BuildKind): boolean {
-  const cost = (balance.costs as Record<BuildKind, { logs: number; planks: number }>)[kind];
-  if (totalLogs(w) < cost.logs || totalPlanks(w) < cost.planks) return false;
+  const cost = costOf(w, kind);
+  if (totalLogs(w) < cost.logs || totalPlanks(w) < cost.planks || w.stone < cost.stone) return false;
   let need = cost.logs;
   for (const b of ofKind(w, 'hut')) {
     const take = Math.min(b.logs, need);
@@ -233,6 +260,7 @@ function payCost(w: World, kind: BuildKind): boolean {
     need -= take;
     if (need <= 0) break;
   }
+  w.stone -= cost.stone;
   return true;
 }
 
@@ -240,12 +268,25 @@ function payCost(w: World, kind: BuildKind): boolean {
 export function placeBuilding(w: World, kind: BuildKind, anchor: Tile): Building | null {
   const cells = footprintFor(kind, anchor.x, anchor.y);
   if (placementError(w, kind, cells)) return null;
-  const cost = (balance.costs as Record<BuildKind, { logs: number; planks: number }>)[kind];
+  const cost = costOf(w, kind);
   if (!payCost(w, kind)) return null;
   return makeBuilding(w, kind, cells, false, cost.logs);
 }
 
 // ---------- lógica de colonos ----------
+
+function nearestRock(w: World, fx: number, fy: number): Tile | null {
+  let best: Tile | null = null;
+  let bd = Infinity;
+  for (let y = 0; y < w.grid.h; y++) {
+    for (let x = 0; x < w.grid.w; x++) {
+      if (w.grid.get(x, y).terrain !== 'rock') continue;
+      const d = Math.abs(x - fx) + Math.abs(y - fy);
+      if (d < bd) { bd = d; best = { x, y }; }
+    }
+  }
+  return best;
+}
 
 function assignTree(w: World, s: Settler): void {
   const t = nearestForest(w, Math.round(s.x), Math.round(s.y));
@@ -293,14 +334,54 @@ function tickLumberjack(w: World, s: Settler, dt: number): void {
   }
 }
 
-/** Primera obra sin terminar que aún necesita troncos (sierras, almacenes, cabañas). */
+/** Primera obra sin terminar que aún necesita troncos. */
 function siteNeedingLogs(w: World): Building | null {
-  const order: BuildKind[] = ['sawmill', 'warehouse', 'hut'];
+  const order: BuildKind[] = ['sawmill', 'warehouse', 'hut', 'quarry'];
   for (const k of order) {
     const b = w.buildings.find((x) => x.kind === k && !x.built && x.gotLogs < x.needLogs);
     if (b) return b;
   }
   return null;
+}
+
+function assignRock(w: World, s: Settler): void {
+  const t = nearestRock(w, Math.round(s.x), Math.round(s.y));
+  if (!t) { s.state = 'idle'; s.path = []; return; }
+  const adj = adjacentFree(w.grid, t.x, t.y);
+  if (!adj) { s.state = 'idle'; s.path = []; return; }
+  s.to = t;
+  setPathTo(w, s, adj.x, adj.y);
+  s.state = s.path.length > 0 ? 'toRock' : 'quarrying';
+  if (s.state === 'quarrying') s.timer = balance.times.quarryStone;
+}
+
+function tickMason(w: World, s: Settler, dt: number): void {
+  if (s.state === 'idle') { assignRock(w, s); return; }
+  if (s.state === 'toRock') {
+    if (moveAlong(s, dt)) {
+      s.state = 'quarrying';
+      s.timer = balance.times.quarryStone;
+    }
+    return;
+  }
+  if (s.state === 'quarrying') {
+    s.timer -= dt;
+    if (s.timer > 0 || !s.to) return;
+    s.carry = 'stone';
+    const wh = nearest(ofKind(w, 'warehouse'), Math.round(s.x), Math.round(s.y))
+      ?? nearest(ofKind(w, 'hut'), Math.round(s.x), Math.round(s.y));
+    const adj = wh ? adjacentTo(w.grid, wh.cells) : null;
+    if (adj) setPathTo(w, s, adj.x, adj.y);
+    s.state = 'toStore';
+    return;
+  }
+  if (s.state === 'toStore') {
+    if (moveAlong(s, dt)) {
+      if (s.carry === 'stone') w.stone++;
+      s.carry = null;
+      assignRock(w, s);
+    }
+  }
 }
 
 function tickBuilder(w: World, s: Settler, dt: number): void {
@@ -450,17 +531,23 @@ function finishConstruction(w: World, b: Building): void {
   if (b.kind === 'hut') {
     // Nueva cabaña = nuevo leñador (con tope).
     const jacks = w.settlers.filter((s) => s.job === 'lumberjack').length;
-    if (jacks < balance.maxLumberjacks) {
-      const adj = adjacentTo(w.grid, b.cells);
-      const id = Math.max(...w.settlers.map((s) => s.id)) + 1;
-      const s: Settler = {
-        id, job: 'lumberjack', x: adj ? adj.x : b.cells[0].x, y: adj ? adj.y : b.cells[0].y,
-        path: [], state: 'idle', timer: 0, carry: null,
-        from: null, to: null, building: null, siteId: null,
-      };
-      w.settlers.push(s);
-    }
+    if (jacks < balance.maxLumberjacks) spawnSettler(w, b, 'lumberjack');
   }
+  if (b.kind === 'quarry') {
+    // Nueva cantera = nuevo cantero (con tope).
+    const masons = w.settlers.filter((s) => s.job === 'mason').length;
+    if (masons < (balance.maxMasons as number)) spawnSettler(w, b, 'mason');
+  }
+}
+
+function spawnSettler(w: World, b: Building, job: 'lumberjack' | 'mason'): void {
+  const adj = adjacentTo(w.grid, b.cells);
+  const id = Math.max(...w.settlers.map((s) => s.id)) + 1;
+  w.settlers.push({
+    id, job, x: adj ? adj.x : b.cells[0].x, y: adj ? adj.y : b.cells[0].y,
+    path: [], state: 'idle', timer: 0, carry: null,
+    from: null, to: null, building: null, siteId: null,
+  });
 }
 
 export function tick(w: World, dt: number): void {
@@ -489,6 +576,7 @@ export function tick(w: World, dt: number): void {
   }
   for (const s of w.settlers) {
     if (s.job === 'lumberjack') tickLumberjack(w, s, dt);
+    else if (s.job === 'mason') tickMason(w, s, dt);
     else if (s.id === 3 && (siteNeedingLogs(w) || s.state === 'bPickup' || s.state === 'bDrop')) tickBuilder(w, s, dt);
     else tickCarrier(w, s, dt);
   }

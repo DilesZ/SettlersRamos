@@ -21,6 +21,9 @@
 - [x] T006 Edificios del jugador: menú (cabaña 2🪵/sierra 4🪵/almacén 4🪵2🧱),
   fantasma verde/rojo, territorio (radio 6), costes, constructor, cabaña nueva =
   leñador nuevo (tope 6). Sim con edificios[] + stocks globales. 14/14 tests.
+- [x] Cadena de piedra: cantera (clay_pit UH, 4🪵, junto a roca ≤2) + cantero
+  (gris, tala→pica→almacena) + stock 🪨 + 2ª sierra/almacén/cantera exigen +2🪨.
+  5 filones en mapa. Guardado v3. 17/17 tests.
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
 - [ ] T009 Save/load localStorage + victoria 10 tablones

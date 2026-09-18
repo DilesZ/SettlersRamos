@@ -2,7 +2,7 @@
 import type { Terrain } from './grid';
 import type { World, Building, BuildKind } from './economy';
 
-export const SAVE_KEY = 'settlers-ramos-save-v2';
+export const SAVE_KEY = 'settlers-ramos-save-v3';
 
 interface SaveBuilding {
   id: number; kind: BuildKind; cells: Array<{ x: number; y: number }>;
@@ -12,19 +12,20 @@ interface SaveBuilding {
 }
 
 interface SaveData {
-  v: 2;
+  v: 3;
   w: number;
   h: number;
   terrain: Terrain[];
   buildings: SaveBuilding[];
   settlers: Array<{
-    id: number; job: 'lumberjack' | 'carrier'; x: number; y: number;
+    id: number; job: 'lumberjack' | 'carrier' | 'mason'; x: number; y: number;
     path: Array<{ x: number; y: number }>;
-    state: string; timer: number; carry: 'log' | 'plank' | null;
+    state: string; timer: number; carry: 'log' | 'plank' | 'stone' | null;
     from: { x: number; y: number } | null; to: { x: number; y: number } | null;
     building: 'sawmill' | 'warehouse' | null; siteId: number | null;
   }>;
   stumps: Array<{ x: number; y: number; age: number }>;
+  stone: number;
   time: number;
   won: boolean;
   nextId: number;
@@ -38,7 +39,7 @@ export function serialize(w: World): string {
     constructing: bd.constructing, buildTimer: bd.buildTimer,
   });
   const data: SaveData = {
-    v: 2,
+    v: 3,
     w: w.grid.w,
     h: w.grid.h,
     terrain: Array.from({ length: w.grid.w * w.grid.h }, (_, i) => {
@@ -54,6 +55,7 @@ export function serialize(w: World): string {
       carry: s.carry, from: s.from, to: s.to, building: s.building, siteId: s.siteId,
     })),
     stumps: w.stumps.map((s) => ({ x: s.x, y: s.y, age: s.age })),
+    stone: w.stone,
     time: w.time,
     won: w.won,
     nextId: w.nextId,
@@ -64,7 +66,7 @@ export function serialize(w: World): string {
 export function deserialize(json: string, createWorld: () => World): World | null {
   try {
     const data = JSON.parse(json) as SaveData;
-    if (data.v !== 2 || data.w !== 15 || data.h !== 8) return null;
+    if (data.v !== 3 || data.w !== 15 || data.h !== 8) return null;
     const w = createWorld();
     for (let y = 0; y < data.h; y++) {
       for (let x = 0; x < data.w; x++) {
@@ -90,6 +92,7 @@ export function deserialize(json: string, createWorld: () => World): World | nul
       building: s.building, siteId: s.siteId,
     }));
     w.stumps = data.stumps.map((s) => ({ x: s.x, y: s.y, age: s.age }));
+    w.stone = data.stone;
     w.time = data.time;
     w.won = data.won;
     w.nextId = data.nextId;
