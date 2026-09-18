@@ -5,8 +5,8 @@
   `assets/approved/` + vendor + `CREDITS.md` (`python scripts/curate-cc0.py`).
   Enmienda: vista iso → top-down 64x64 (constitución + plan actualizados).
 - [x] T003 Atlas (`python scripts/make-atlas.py` -> `public/atlas/`) + `GameScene` demo top-down
-- [ ] T004 Sim grid + A* + tests (`astar.test.ts`)
-- [ ] T005 Economy tick: talar→tronco→tablón + tests (`economy.test.ts`)
+- [x] T004 Sim grid 15x8 + A* + tests (`tests/astar.test.ts`, 4 tests)
+- [x] T005 Economy tick 20Hz: talar→tronco→sierra→tablón→almacén + tests (`tests/economy.test.ts`, 3 tests, victoria verificada)
 - [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
