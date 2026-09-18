@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import './style.css';
 import { createDemoWorld, tick, World, BUILD_TIME } from './sim/economy';
+import { saveGame, loadGame, hasSave, clearSave } from './sim/save';
 import { ATLAS_META } from './view/atlasMeta';
 
 const TW = 64;
@@ -39,7 +40,7 @@ const GRASS_TINTS = [0xffffff, 0xf4ffea, 0xeafbdc, 0xfdffef];
 
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
-  create() { this.scene.start('Preload'); }
+  create() { this.scene.start('Title'); }
 }
 
 class PreloadScene extends Phaser.Scene {
@@ -52,7 +53,41 @@ class PreloadScene extends Phaser.Scene {
     this.load.audio('sfx-plank', 'sfx/plank.ogg');
     this.load.audio('sfx-victory', 'sfx/victory.ogg');
   }
-  create() { this.scene.start('Game'); }
+  create() { this.scene.start('Title'); }
+}
+
+class TitleScene extends Phaser.Scene {
+  constructor() { super('Title'); }
+  create() {
+    this.add.rectangle(0, 0, 960, 540, 0x16241a).setOrigin(0);
+    this.add.rectangle(0, 0, 960, 200, 0x1d3320).setOrigin(0);
+    this.add.text(480, 150, '⚒ SETTLERS RAMOS', {
+      fontSize: '52px', color: '#ffd98a', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.add.text(480, 200, 'Un tributo económico estilo Settlers · arte CC-BY-SA Unknown Horizons', {
+      fontSize: '15px', color: '#cfe3c0',
+    }).setOrigin(0.5);
+    const btn = (y: number, label: string, fn: () => void) => {
+      const t = this.add.text(480, y, label, {
+        fontSize: '22px', color: '#1a2b1a', backgroundColor: '#ffd98a',
+        padding: { x: 28, y: 10 },
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+        .on('pointerover', () => t.setStyle({ backgroundColor: '#ffe9b8' }))
+        .on('pointerout', () => t.setStyle({ backgroundColor: '#ffd98a' }))
+        .on('pointerdown', fn);
+      return t;
+    };
+    btn(290, '▶  JUGAR', () => { clearSave(); this.scene.start('Game', { fresh: true }); });
+    if (hasSave()) {
+      btn(350, '↻  CONTINUAR', () => { this.scene.start('Game', { fresh: false }); });
+    }
+    this.add.text(480, 440, 'Arrastra para mover · Rueda = zoom · Clic en edificios para info · M = silencio', {
+      fontSize: '14px', color: '#9fb894',
+    }).setOrigin(0.5);
+    this.add.text(480, 466, 'Objetivo: construye sierra y almacén y entrega 10 tablones', {
+      fontSize: '14px', color: '#9fb894',
+    }).setOrigin(0.5);
+  }
 }
 
 class GameScene extends Phaser.Scene {
@@ -75,6 +110,8 @@ class GameScene extends Phaser.Scene {
   private sawBar!: Phaser.GameObjects.Rectangle;
   private chopBar!: Phaser.GameObjects.Rectangle;
   private winText!: Phaser.GameObjects.Text;
+  private dayOverlay!: Phaser.GameObjects.Rectangle;
+  private saveTimer = 0;
   private mm!: Phaser.GameObjects.Graphics;
   private mmTimer = 0;
   private panel!: Phaser.GameObjects.Container;
@@ -115,9 +152,12 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  create() {
-    this.world = createDemoWorld();
+  create(data: { fresh?: boolean }) {
+    this.world = data.fresh === false ? (loadGame(createDemoWorld) ?? createDemoWorld()) : createDemoWorld();
     const w = this.world;
+    this.prevPlanks = w.warehouse.planks;
+    this.prevStumps = w.stumps.length;
+    this.prevBuilt = `${w.sawmill.built}${w.warehouse.built}`;
     // Cámara RTS: zoom inicial + drag + rueda
     const cam = this.cameras.main;
     cam.setZoom(1.3);
@@ -164,10 +204,12 @@ class GameScene extends Phaser.Scene {
       () => `Troncos en stock: ${w.hut.logs}`));
     for (const b of [w.sawmill, w.warehouse]) {
       const c = footprintCenter(b.cells);
-      const img = this.put('scaffold', c.x, c.y, (c.x + c.y) * 10 + 3);
+      const frame = b.built ? (b.kind === 'sawmill' ? 'sawmill' : 'warehouse') : 'scaffold';
+      const img = this.put(frame, c.x, c.y, (c.x + c.y) * 10 + 3);
       this.siteImgs.set(b.kind, img);
       const p = iso(c.x, c.y);
       const bar = this.add.rectangle(p.sx, p.sy - 84, 44, 5, 0xffd23f).setDepth(480);
+      bar.setVisible(!b.built);
       this.siteBars.set(b.kind, bar);
       img.setInteractive({ useHandCursor: true });
       const title = b.kind === 'sawmill' ? 'Sierra' : 'Almacén';
@@ -261,7 +303,26 @@ class GameScene extends Phaser.Scene {
     this.winText = this.add.text(480, 250, '¡VICTORIA!\n10 tablones entregados', {
       fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
       padding: { x: 24, y: 16 }, align: 'center',
-    }).setOrigin(0.5).setDepth(600).setScrollFactor(0).setVisible(false);
+    }).setOrigin(0.5).setDepth(600).setScrollFactor(0).setVisible(w.won);
+    // Ciclo día/noche sutil (240 s): overlay a pantalla fija bajo el HUD
+    this.dayOverlay = this.add.rectangle(0, 0, 960, 540, 0x0a1030, 0).setOrigin(0)
+      .setDepth(495).setScrollFactor(0);
+  }
+
+  /** Color y alfa del momento del día según w.time (ciclo 240 s). */
+  private daylight(): { color: number; alpha: number; icon: string } {
+    const ph = (this.world.time % 240) / 240;
+    if (ph < 0.6) return { color: 0x000000, alpha: 0, icon: '🌞' };
+    if (ph < 0.72) {
+      const k = (ph - 0.6) / 0.12;
+      return { color: 0xe88030, alpha: 0.14 * k, icon: '🌇' };
+    }
+    if (ph < 0.92) {
+      const k = (ph - 0.72) / 0.2;
+      return { color: 0x0a1030, alpha: 0.30 * Math.min(1, k * 1.5), icon: '🌙' };
+    }
+    const k = (ph - 0.92) / 0.08;
+    return { color: 0xe08070, alpha: 0.10 * (1 - k), icon: '🌅' };
   }
 
   private buildingInfo(kind: string): string {
@@ -471,12 +532,23 @@ class GameScene extends Phaser.Scene {
     const spd = this.speed === 0 ? 'PAUSA' : `${this.speed}×`;
     const obra = !w.sawmill.built ? `Obra sierra ${w.sawmill.gotLogs}/2`
       : !w.warehouse.built ? `Obra almacén ${w.warehouse.gotLogs}/2` : 'Colonia lista';
+    const mm = Math.floor(w.time / 60);
+    const ss = Math.floor(w.time % 60).toString().padStart(2, '0');
+    const dl = this.daylight();
+    this.dayOverlay.setFillStyle(dl.color, dl.alpha);
     this.hud.setText(
-      `🪵 ${w.hut.logs}   🧱 ${w.warehouse.planks}/10   ${obra}   [${spd}]`,
+      `${dl.icon} ${mm}:${ss}   🪵 ${w.hut.logs}   🧱 ${w.warehouse.planks}/10   ${obra}   [${spd}]`,
     );
     if (w.won && !this.winText.visible) {
       this.winText.setVisible(true);
       this.sfx('sfx-victory', 0.9);
+      saveGame(w);
+    }
+    // Autoguardado cada 10 s
+    this.saveTimer += delta;
+    if (this.saveTimer > 10000) {
+      this.saveTimer = 0;
+      if (!w.won) saveGame(w);
     }
   }
 }
@@ -487,5 +559,5 @@ new Phaser.Game({
   width: 960,
   height: 540,
   backgroundColor: '#20301c',
-  scene: [BootScene, PreloadScene, GameScene],
+  scene: [BootScene, PreloadScene, TitleScene, GameScene],
 });
