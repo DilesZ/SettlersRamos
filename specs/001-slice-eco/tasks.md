@@ -10,6 +10,9 @@
 - [x] UH-iso: 24 sprites CC-BY-SA Unknown Horizons (leñador idle/move/carry/work,
   edificios, árboles, duelda 64x32) + `curate-uh.py` + `atlasMeta` + vista iso
   (huellas, tocones, stock en cabaña). Enmienda top-down → iso.
+- [x] V2 visual: leñador en 8 direcciones (idle/move/carry/work × 8 rots),
+  construcción con andamios (sierra+almacén piden 2 troncos, 15 s de obra),
+  rebrote de bosque a 120 s, setas, roca variada, agua viva. 9/9 tests.
 - [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa
