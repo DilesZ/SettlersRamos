@@ -40,7 +40,12 @@ const GRASS_TINTS = [0xffffff, 0xf4ffea, 0xeafbdc, 0xfdffef];
 
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
-  create() { this.scene.start('Title'); }
+  create() {
+    // ?scene=game salta el título (útil para pruebas automatizadas con captura).
+    const q = new URLSearchParams(window.location.search);
+    this.registry.set('autostart', q.get('scene') === 'game');
+    this.scene.start('Preload');
+  }
 }
 
 class PreloadScene extends Phaser.Scene {
@@ -53,7 +58,10 @@ class PreloadScene extends Phaser.Scene {
     this.load.audio('sfx-plank', 'sfx/plank.ogg');
     this.load.audio('sfx-victory', 'sfx/victory.ogg');
   }
-  create() { this.scene.start('Title'); }
+  create() {
+    if (this.registry.get('autostart')) this.scene.start('Game', { fresh: true });
+    else this.scene.start('Title');
+  }
 }
 
 class TitleScene extends Phaser.Scene {
@@ -77,7 +85,8 @@ class TitleScene extends Phaser.Scene {
         .on('pointerdown', fn);
       return t;
     };
-    btn(290, '▶  JUGAR', () => { clearSave(); this.scene.start('Game', { fresh: true }); });
+    const jugarBtn = btn(290, '▶  JUGAR', () => { clearSave(); this.scene.start('Game', { fresh: true }); });
+    this.tweens.add({ targets: jugarBtn, scale: 1.06, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     if (hasSave()) {
       btn(350, '↻  CONTINUAR', () => { this.scene.start('Game', { fresh: false }); });
     }
@@ -91,10 +100,10 @@ class TitleScene extends Phaser.Scene {
 }
 
 class GameScene extends Phaser.Scene {
-  private world!: World;
+  public world!: World;
+  public speed = 1;
+  public muted = false;
   private acc = 0;
-  private speed = 1;
-  private muted = false;
   private settlerSprites = new Map<number, Phaser.GameObjects.Image>();
   private settlerRot = new Map<number, string>();
   private treeSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -106,18 +115,9 @@ class GameScene extends Phaser.Scene {
   private siteImgs = new Map<string, Phaser.GameObjects.Image>();
   private siteBars = new Map<string, Phaser.GameObjects.Rectangle>();
   private flagImg!: Phaser.GameObjects.Image;
-  private hud!: Phaser.GameObjects.Text;
   private sawBar!: Phaser.GameObjects.Rectangle;
   private chopBar!: Phaser.GameObjects.Rectangle;
-  private winText!: Phaser.GameObjects.Text;
-  private dayOverlay!: Phaser.GameObjects.Rectangle;
   private saveTimer = 0;
-  private mm!: Phaser.GameObjects.Graphics;
-  private mmTimer = 0;
-  private panel!: Phaser.GameObjects.Container;
-  private panelTitle!: Phaser.GameObjects.Text;
-  private panelBody!: Phaser.GameObjects.Text;
-  private panelTimer = 0;
   // estado previo para eventos de sonido/partículas
   private prevPlanks = 0;
   private prevStumps = 0;
@@ -126,17 +126,20 @@ class GameScene extends Phaser.Scene {
 
   constructor() { super('Game'); }
 
+  public setSpeed(v: number): void { this.speed = v; }
+  public toggleMute(): boolean { this.muted = !this.muted; return this.muted; }
+
+  public sfx(key: string, volume = 1): void {
+    if (this.muted) return;
+    try { this.sound.play(key, { volume }); } catch { /* audio aún bloqueado */ }
+  }
+
   private put(frame: string, x: number, y: number, depth: number): Phaser.GameObjects.Image {
     const m = ATLAS_META[frame];
     const { sx, sy } = iso(x, y);
     return this.add.image(sx, sy, 'uh', frame)
       .setOrigin(m.ax / m.w, m.ay / m.h)
       .setDepth(depth);
-  }
-
-  private sfx(key: string, volume = 1): void {
-    if (this.muted) return;
-    try { this.sound.play(key, { volume }); } catch { /* audio aún bloqueado */ }
   }
 
   private burst(x: number, y: number, color: number, n = 6): void {
@@ -158,10 +161,10 @@ class GameScene extends Phaser.Scene {
     this.prevPlanks = w.warehouse.planks;
     this.prevStumps = w.stumps.length;
     this.prevBuilt = `${w.sawmill.built}${w.warehouse.built}`;
-    // Cámara RTS: zoom inicial + drag + rueda
+    // Cámara RTS: isla entera visible + drag + rueda
     const cam = this.cameras.main;
-    cam.setZoom(1.3);
-    cam.centerOn(422, 235);
+    cam.setZoom(1.0);
+    cam.centerOn(422, 245);
     let dragX = 0;
     let dragY = 0;
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { dragX = p.x; dragY = p.y; });
@@ -173,7 +176,11 @@ class GameScene extends Phaser.Scene {
       dragX = p.x; dragY = p.y;
     });
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 1.0, 2.0));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.8, 2.0));
+    });
+    this.input.keyboard?.on('keydown-M', () => {
+      const hud = this.scene.get('Hud') as unknown as HudScene;
+      hud.syncMute(this.toggleMute());
     });
     // Suelo con variación de tinte determinista
     for (let y = 0; y < w.grid.h; y++) {
@@ -200,8 +207,7 @@ class GameScene extends Phaser.Scene {
     this.hutImg = this.put('hut', hc.x, hc.y, (hc.x + hc.y) * 10 + 3);
     this.hutFrame = 'hut';
     this.hutImg.setInteractive({ useHandCursor: true });
-    this.hutImg.on('pointerdown', () => this.showPanel('Cabaña del leñador',
-      () => `Troncos en stock: ${w.hut.logs}`));
+    this.hutImg.on('pointerdown', () => this.hud().showPanel('Cabaña del leñador'));
     for (const b of [w.sawmill, w.warehouse]) {
       const c = footprintCenter(b.cells);
       const frame = b.built ? (b.kind === 'sawmill' ? 'sawmill' : 'warehouse') : 'scaffold';
@@ -212,8 +218,7 @@ class GameScene extends Phaser.Scene {
       bar.setVisible(!b.built);
       this.siteBars.set(b.kind, bar);
       img.setInteractive({ useHandCursor: true });
-      const title = b.kind === 'sawmill' ? 'Sierra' : 'Almacén';
-      img.on('pointerdown', () => this.showPanel(title, () => this.buildingInfo(b.kind)));
+      img.on('pointerdown', () => this.hud().showPanel(b.kind === 'sawmill' ? 'Sierra' : 'Almacén'));
     }
     const tag = (x: number, y: number, name: string) => {
       const { sx, sy } = iso(x, y);
@@ -259,115 +264,11 @@ class GameScene extends Phaser.Scene {
     }
     this.sawBar = this.add.rectangle(0, 0, 40, 5, 0xffd23f).setDepth(480).setVisible(false);
     this.chopBar = this.add.rectangle(0, 0, 30, 4, 0x7ddf64).setDepth(480).setVisible(false);
-    // HUD fijo (no sigue a la cámara)
-    const fix = (o: Phaser.GameObjects.GameObject) => (o as Phaser.GameObjects.Image).setScrollFactor(0);
-    const bar = this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(500);
-    const bar2 = this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(500);
-    const title = this.add.text(12, 10, '⚒ SETTLERS RAMOS · iso UH', { fontSize: '17px', color: '#ffd98a' }).setDepth(501);
-    this.hud = this.add.text(330, 10, '', { fontSize: '15px', color: '#fff' }).setDepth(501);
-    for (const o of [bar, bar2, title, this.hud]) fix(o);
-    const btn = (x: number, label: string, fn: () => void) => {
-      const t = this.add.text(x, 8, label, {
-        fontSize: '15px', color: '#ffe08a', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
-      }).setDepth(501).setInteractive({ useHandCursor: true }).setScrollFactor(0)
-        .on('pointerdown', () => { this.sfx('sfx-click', 0.5); fn(); });
-      return t;
-    };
-    const muteBtn = btn(740, '🔊', () => {
-      this.muted = !this.muted;
-      muteBtn.setText(this.muted ? '🔇' : '🔊');
-      if (!this.muted) this.sfx('sfx-click', 0.5);
-    });
-    btn(786, '❚❚', () => { this.speed = 0; });
-    btn(826, '1×', () => { this.speed = 1; });
-    btn(876, '2×', () => { this.speed = 2; });
-    this.input.keyboard?.on('keydown-M', () => { this.muted = !this.muted; });
-    // Minimapa
-    this.add.rectangle(828, 440, 124, 68, 0x000000, 0.55).setDepth(501).setScrollFactor(0);
-    this.mm = this.add.graphics().setDepth(502).setScrollFactor(0);
-    const mmZone = this.add.zone(830, 442, 120, 64).setOrigin(0).setDepth(503)
-      .setScrollFactor(0).setInteractive({ useHandCursor: true });
-    mmZone.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      const cx = Math.floor((p.x - 830) / 8);
-      const cy = Math.floor((p.y - 442) / 8);
-      if (cx < 0 || cy < 0 || cx >= w.grid.w || cy >= w.grid.h) return;
-      const { sx, sy } = iso(cx, cy);
-      cam.centerOn(sx, sy);
-      this.sfx('sfx-click', 0.4);
-    });
-    // Panel de edificio
-    this.panelTitle = this.add.text(16, 470, '', { fontSize: '15px', color: '#ffd98a' }).setDepth(502).setScrollFactor(0);
-    this.panelBody = this.add.text(16, 492, '', { fontSize: '13px', color: '#fff' }).setDepth(502).setScrollFactor(0);
-    const panelBg = this.add.rectangle(8, 462, 300, 70, 0x000000, 0.6).setOrigin(0).setDepth(501).setScrollFactor(0);
-    this.panel = this.add.container(0, 0, [panelBg, this.panelTitle, this.panelBody]).setDepth(501).setScrollFactor(0).setVisible(false);
-    this.winText = this.add.text(480, 250, '¡VICTORIA!\n10 tablones entregados', {
-      fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
-      padding: { x: 24, y: 16 }, align: 'center',
-    }).setOrigin(0.5).setDepth(600).setScrollFactor(0).setVisible(w.won);
-    // Ciclo día/noche sutil (240 s): overlay a pantalla fija bajo el HUD
-    this.dayOverlay = this.add.rectangle(0, 0, 960, 540, 0x0a1030, 0).setOrigin(0)
-      .setDepth(495).setScrollFactor(0);
+    this.scene.launch('Hud');
   }
 
-  /** Color y alfa del momento del día según w.time (ciclo 240 s). */
-  private daylight(): { color: number; alpha: number; icon: string } {
-    const ph = (this.world.time % 240) / 240;
-    if (ph < 0.6) return { color: 0x000000, alpha: 0, icon: '🌞' };
-    if (ph < 0.72) {
-      const k = (ph - 0.6) / 0.12;
-      return { color: 0xe88030, alpha: 0.14 * k, icon: '🌇' };
-    }
-    if (ph < 0.92) {
-      const k = (ph - 0.72) / 0.2;
-      return { color: 0x0a1030, alpha: 0.30 * Math.min(1, k * 1.5), icon: '🌙' };
-    }
-    const k = (ph - 0.92) / 0.08;
-    return { color: 0xe08070, alpha: 0.10 * (1 - k), icon: '🌅' };
-  }
-
-  private buildingInfo(kind: string): string {
-    const w = this.world;
-    const b = kind === 'sawmill' ? w.sawmill : w.warehouse;
-    if (!b.built) {
-      return b.constructing
-        ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
-        : `Solar: faltan ${b.needLogs - b.gotLogs} troncos`;
-    }
-    if (kind === 'sawmill') {
-      return w.sawmill.busy ? 'Cortando tablón…' : w.sawmill.done ? 'Tablón listo para recoger' : 'Esperando troncos';
-    }
-    return `Tablones: ${w.warehouse.planks}/10`;
-  }
-
-  private showPanel(title: string, body: () => string): void {
-    this.panelTitle.setText(title);
-    this.panelBody.setText(body());
-    this.panel.setVisible(true);
-    this.panelTimer = 8;
-    this.sfx('sfx-click', 0.4);
-  }
-
-  private drawMinimap(): void {
-    const w = this.world;
-    const g = this.mm;
-    g.clear();
-    for (let y = 0; y < w.grid.h; y++) {
-      for (let x = 0; x < w.grid.w; x++) {
-        const c = w.grid.get(x, y);
-        let col = 0x5a8f3e;
-        if (c.terrain === 'road') col = 0xb08d57;
-        else if (c.terrain === 'water') col = 0x5aa3c8;
-        else if (c.terrain === 'forest') col = 0x2f6b2f;
-        else if (c.terrain === 'rock') col = 0x9a9a9a;
-        if (c.building) col = 0xc46a2e;
-        g.fillStyle(col, 1);
-        g.fillRect(830 + x * 8, 442 + y * 8, 8, 8);
-      }
-    }
-    for (const s of w.settlers) {
-      g.fillStyle(s.carry ? 0xffe08a : 0xffffff, 1);
-      g.fillCircle(830 + s.x * 8 + 4, 442 + s.y * 8 + 4, 2.5);
-    }
+  private hud(): HudScene {
+    return this.scene.get('Hud') as unknown as HudScene;
   }
 
   update(time: number, delta: number) {
@@ -409,7 +310,7 @@ class GameScene extends Phaser.Scene {
     for (const [k, img] of this.stumpSprites) {
       if (!seenStumps.has(k)) { img.destroy(); this.stumpSprites.delete(k); }
     }
-    // Eventos: tala (tocón nuevo), tablón, obra terminada, victoria
+    // Eventos: tala (tocón nuevo), tablón, obra terminada
     if (w.stumps.length > this.prevStumps) {
       const st = w.stumps[w.stumps.length - 1];
       const p = iso(st.x, st.y);
@@ -513,7 +414,158 @@ class GameScene extends Phaser.Scene {
       this.sawBar.setPosition(p.sx, p.sy - 78);
       this.sawBar.setScale(Math.max(0.05, w.sawmill.timer / 10), 1);
     } else this.sawBar.setVisible(false);
-    // Minimapa (4 Hz) + panel temporal
+    // Autoguardado cada 10 s
+    this.saveTimer += delta;
+    if (this.saveTimer > 10000) {
+      this.saveTimer = 0;
+      if (!w.won) saveGame(w);
+    }
+  }
+}
+
+class HudScene extends Phaser.Scene {
+  private hud!: Phaser.GameObjects.Text;
+  private mmTex!: Phaser.Textures.CanvasTexture;
+  private mmTimer = 0;
+  private panel!: Phaser.GameObjects.Container;
+  private panelTitle!: Phaser.GameObjects.Text;
+  private panelBody!: Phaser.GameObjects.Text;
+  private panelTimer = 0;
+  private panelKind = '';
+  private winText!: Phaser.GameObjects.Text;
+  private dayOverlay!: Phaser.GameObjects.Rectangle;
+  private muteBtn!: Phaser.GameObjects.Text;
+
+  constructor() { super('Hud'); }
+
+  private gameScene(): GameScene {
+    return this.scene.get('Game') as unknown as GameScene;
+  }
+
+  public showPanel(title: string): void {
+    this.panelTitle.setText(title);
+    this.panelKind = title;
+    this.panel.setVisible(true);
+    this.panelTimer = 8;
+    this.gameScene().sfx('sfx-click', 0.4);
+  }
+
+  public syncMute(muted: boolean): void {
+    this.muteBtn.setText(muted ? '🔇' : '🔊');
+  }
+
+  private buildingInfo(kind: 'sawmill' | 'warehouse' | 'hut'): string {
+    const w = this.gameScene().world;
+    if (kind === 'hut') return `Troncos en stock: ${w.hut.logs}`;
+    const b = kind === 'sawmill' ? w.sawmill : w.warehouse;
+    if (!b.built) {
+      return b.constructing
+        ? `En obra… ${Math.ceil(b.buildTimer)} s restantes`
+        : `Solar: faltan ${b.needLogs - b.gotLogs} troncos`;
+    }
+    if (kind === 'sawmill') {
+      return w.sawmill.busy ? 'Cortando tablón…' : w.sawmill.done ? 'Tablón listo para recoger' : 'Esperando troncos';
+    }
+    return `Tablones: ${w.warehouse.planks}/10`;
+  }
+
+  create() {
+    document.title = 'HUDCREATE';
+    const g = () => this.gameScene();
+    // Overlay día/noche bajo el HUD
+    this.dayOverlay = this.add.rectangle(0, 0, 960, 540, 0x0a1030, 0).setOrigin(0).setDepth(5);
+    // Barra de madera
+    this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(10);
+    this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(10);
+    this.add.text(12, 10, '⚒ SETTLERS RAMOS · iso UH', { fontSize: '17px', color: '#ffd98a' }).setDepth(11);
+    this.hud = this.add.text(330, 10, '', { fontSize: '15px', color: '#fff' }).setDepth(11);
+    const btn = (x: number, label: string, fn: () => void) => {
+      const t = this.add.text(x, 8, label, {
+        fontSize: '15px', color: '#ffe08a', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
+      }).setDepth(11).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => { g().sfx('sfx-click', 0.5); fn(); });
+      return t;
+    };
+    this.muteBtn = btn(740, '🔊', () => this.syncMute(g().toggleMute()));
+    btn(786, '❚❚', () => g().setSpeed(0));
+    btn(826, '1×', () => g().setSpeed(1));
+    btn(876, '2×', () => g().setSpeed(2));
+    // Minimapa clicable
+    this.add.rectangle(828, 440, 124, 68, 0x000000, 0.55).setDepth(11);
+    // Minimapa clicable (CanvasTexture: robusto en todos los renderers)
+    this.mmTex = this.textures.createCanvas('minimap', 120, 64)!;
+    this.add.image(830, 442, 'minimap').setOrigin(0).setDepth(12);
+    const mmZone = this.add.zone(830, 442, 120, 64).setOrigin(0).setDepth(13)
+      .setInteractive({ useHandCursor: true });
+    mmZone.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      const game = g();
+      const cx = Math.floor((p.x - 830) / 8);
+      const cy = Math.floor((p.y - 442) / 8);
+      if (cx < 0 || cy < 0 || cx >= game.world.grid.w || cy >= game.world.grid.h) return;
+      const { sx, sy } = iso(cx, cy);
+      game.cameras.main.centerOn(sx, sy);
+      game.sfx('sfx-click', 0.4);
+    });
+    // Panel de edificio
+    const panelBg = this.add.rectangle(8, 462, 300, 70, 0x000000, 0.6).setOrigin(0).setDepth(11);
+    this.panelTitle = this.add.text(16, 470, '', { fontSize: '15px', color: '#ffd98a' }).setDepth(12);
+    this.panelBody = this.add.text(16, 492, '', { fontSize: '13px', color: '#fff' }).setDepth(12);
+    this.panel = this.add.container(0, 0, [panelBg, this.panelTitle, this.panelBody]).setDepth(11).setVisible(false);
+    this.winText = this.add.text(480, 250, '¡VICTORIA!\n10 tablones entregados', {
+      fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
+      padding: { x: 24, y: 16 }, align: 'center',
+    }).setOrigin(0.5).setDepth(20).setVisible(false);
+  }
+
+  private drawMinimap(): void {
+    const w = this.gameScene().world;
+    const ctx = this.mmTex.getContext();
+    ctx.clearRect(0, 0, 120, 64);
+    for (let y = 0; y < w.grid.h; y++) {
+      for (let x = 0; x < w.grid.w; x++) {
+        const c = w.grid.get(x, y);
+        let col = '#5a8f3e';
+        if (c.terrain === 'road') col = '#b08d57';
+        else if (c.terrain === 'water') col = '#5aa3c8';
+        else if (c.terrain === 'forest') col = '#2f6b2f';
+        else if (c.terrain === 'rock') col = '#9a9a9a';
+        if (c.building) col = '#c46a2e';
+        ctx.fillStyle = col;
+        ctx.fillRect(x * 8, y * 8, 8, 8);
+      }
+    }
+    for (const s of w.settlers) {
+      ctx.fillStyle = s.carry ? '#ffe08a' : '#ffffff';
+      ctx.fillRect(Math.floor(s.x * 8) + 2, Math.floor(s.y * 8) + 2, 4, 4);
+    }
+    this.mmTex.refresh();
+  }
+
+  /** Color y alfa del momento del día según w.time (ciclo 240 s). */
+  private daylight(time: number): { color: number; alpha: number; icon: string } {
+    const ph = (time % 240) / 240;
+    if (ph < 0.6) return { color: 0x000000, alpha: 0, icon: '🌞' };
+    if (ph < 0.72) {
+      const k = (ph - 0.6) / 0.12;
+      return { color: 0xe88030, alpha: 0.14 * k, icon: '🌇' };
+    }
+    if (ph < 0.92) {
+      const k = (ph - 0.72) / 0.2;
+      return { color: 0x0a1030, alpha: 0.30 * Math.min(1, k * 1.5), icon: '🌙' };
+    }
+    const k = (ph - 0.92) / 0.08;
+    return { color: 0xe08070, alpha: 0.10 * (1 - k), icon: '🌅' };
+  }
+
+  private hudErr = '';
+  private hudN = 0;
+  update(_time: number, delta: number) {
+    const game = this.gameScene();
+    if (!game.world) return;
+    const w = game.world;
+    try {
+    this.hudN++;
+    document.title = 'HUDN=' + this.hudN + ' t=' + w.time.toFixed(1) + ' err=' + this.hudErr;
     this.mmTimer += delta;
     if (this.mmTimer > 250) {
       this.mmTimer = 0;
@@ -522,33 +574,32 @@ class GameScene extends Phaser.Scene {
     if (this.panel.visible) {
       this.panelTimer -= delta / 1000;
       if (this.panelTimer <= 0) this.panel.setVisible(false);
-      else {
-        // refresca el cuerpo mientras se ve
-        const t = this.panelTitle.text;
-        if (t === 'Cabaña del leñador') this.panelBody.setText(`Troncos en stock: ${w.hut.logs}`);
-        else if (t === 'Sierra' || t === 'Almacén') this.panelBody.setText(this.buildingInfo(t === 'Sierra' ? 'sawmill' : 'warehouse'));
+      else if (this.panelKind === 'Cabaña del leñador') {
+        this.panelBody.setText(`Troncos en stock: ${w.hut.logs}`);
+      } else if (this.panelKind === 'Sierra') {
+        this.panelBody.setText(this.buildingInfo('sawmill'));
+      } else if (this.panelKind === 'Almacén') {
+        this.panelBody.setText(this.buildingInfo('warehouse'));
       }
     }
-    const spd = this.speed === 0 ? 'PAUSA' : `${this.speed}×`;
-    const obra = !w.sawmill.built ? `Obra sierra ${w.sawmill.gotLogs}/2`
-      : !w.warehouse.built ? `Obra almacén ${w.warehouse.gotLogs}/2` : 'Colonia lista';
     const mm = Math.floor(w.time / 60);
     const ss = Math.floor(w.time % 60).toString().padStart(2, '0');
-    const dl = this.daylight();
+    const dl = this.daylight(w.time);
     this.dayOverlay.setFillStyle(dl.color, dl.alpha);
+    const spd = game.speed === 0 ? 'PAUSA' : `${game.speed}×`;
+    const obra = !w.sawmill.built ? `Obra sierra ${w.sawmill.gotLogs}/2`
+      : !w.warehouse.built ? `Obra almacén ${w.warehouse.gotLogs}/2` : 'Colonia lista';
     this.hud.setText(
       `${dl.icon} ${mm}:${ss}   🪵 ${w.hut.logs}   🧱 ${w.warehouse.planks}/10   ${obra}   [${spd}]`,
     );
     if (w.won && !this.winText.visible) {
       this.winText.setVisible(true);
-      this.sfx('sfx-victory', 0.9);
+      game.sfx('sfx-victory', 0.9);
       saveGame(w);
     }
-    // Autoguardado cada 10 s
-    this.saveTimer += delta;
-    if (this.saveTimer > 10000) {
-      this.saveTimer = 0;
-      if (!w.won) saveGame(w);
+    } catch (e) {
+      this.hudErr = String(e).substring(0, 120);
+      document.title = 'HUDERR=' + this.hudErr;
     }
   }
 }
@@ -559,5 +610,5 @@ new Phaser.Game({
   width: 960,
   height: 540,
   backgroundColor: '#20301c',
-  scene: [BootScene, PreloadScene, TitleScene, GameScene],
+  scene: [BootScene, PreloadScene, TitleScene, GameScene, HudScene],
 });
