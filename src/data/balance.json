@@ -1,0 +1,12 @@
+{
+  "tickMs": 50,
+  "mapSize": 48,
+  "winPlanks": 10,
+  "roadSpeed": 1.5,
+  "times": { "chopTree": 8, "sawPlank": 10, "quarryStone": 12 },
+  "costs": {
+    "woodcutter": { "logs": 2, "stones": 0 },
+    "sawmill": { "logs": 2, "stones": 2 },
+    "quarry": { "logs": 2, "stones": 0 }
+  }
+}
