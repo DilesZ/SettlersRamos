@@ -4,7 +4,13 @@ Vertical slice: 1 mapa iso, facción Aurelianos, cadenas madera/piedra, victoria
 Stack: TypeScript + Phaser 3 + Vite → deploy estático en Vercel.
 
 ## Estado
-S0 listo. Bloqueado en T002: generar Lote 1 con Nano Banana (ver `assets/NANO_BANANA_BRIEF.md`).
+Migración UH-iso: colonia automática jugable (talar→tronco→sierra→tablón→almacén,
+victoria a 10 tablones) en https://settlers-ramos.vercel.app.
+
+## Créditos de arte
+Arte isométrico de **Unknown Horizons** (contenido CC-BY-SA 3.0, equipo UH y
+colaboradores). Detalle en `assets/approved/CREDITS.md`; derivados de este repo
+bajo CC-BY-SA 3.0.
 
 ## Comandos
 ```powershell

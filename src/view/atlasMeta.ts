@@ -1,0 +1,28 @@
+// GENERADO por scripts/curate-uh.py — no editar a mano.
+export interface Anchor { ax: number; ay: number; w: number; h: number }
+export const ATLAS_META: Record<string, Anchor> = {
+  grass: { ax: 32, ay: 39, w: 64, h: 64 },
+  grass_var: { ax: 32, ay: 40, w: 64, h: 64 },
+  water: { ax: 32, ay: 47, w: 64, h: 64 },
+  road: { ax: 31, ay: 16, w: 64, h: 32 },
+  stump: { ax: 32, ay: 53, w: 64, h: 64 },
+  rock: { ax: 32, ay: 52, w: 64, h: 64 },
+  flag: { ax: 32, ay: 54, w: 64, h: 64 },
+  lj_idle: { ax: 21, ay: 37, w: 32, h: 42 },
+  lj_walk1: { ax: 21, ay: 36, w: 32, h: 42 },
+  lj_walk2: { ax: 21, ay: 37, w: 32, h: 42 },
+  lj_walk3: { ax: 21, ay: 38, w: 32, h: 42 },
+  lj_walk4: { ax: 21, ay: 37, w: 32, h: 42 },
+  lj_carry1: { ax: 20, ay: 36, w: 32, h: 42 },
+  lj_carry2: { ax: 20, ay: 37, w: 32, h: 42 },
+  lj_carry3: { ax: 20, ay: 38, w: 32, h: 42 },
+  lj_carry4: { ax: 20, ay: 37, w: 32, h: 42 },
+  lj_work: { ax: 21, ay: 37, w: 32, h: 42 },
+  pine: { ax: 32, ay: 127, w: 64, h: 128 },
+  leaf_tree: { ax: 31, ay: 128, w: 64, h: 128 },
+  hut: { ax: 65, ay: 127, w: 128, h: 128 },
+  hut_logs1: { ax: 65, ay: 127, w: 128, h: 128 },
+  hut_logs2: { ax: 65, ay: 127, w: 128, h: 128 },
+  sawmill: { ax: 64, ay: 127, w: 128, h: 128 },
+  warehouse: { ax: 108, ay: 166, w: 192, h: 192 },
+};

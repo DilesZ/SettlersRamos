@@ -1,4 +1,6 @@
-// T005: simulación económica desacoplada del render. Tick fijo 50ms, determinista.
+// Sim económica desacoplada del render. Tick fijo 50ms, determinista.
+// Migración UH-iso: edificios con huella (varias celdas), bosque/agua bloquean,
+// tocones visuales al talar.
 import { Grid } from './grid';
 import { astar, Tile } from './astar';
 import balance from '../data/balance.json';
@@ -20,12 +22,23 @@ export interface Settler {
   building: 'sawmill' | 'warehouse' | null;
 }
 
+export interface Building {
+  kind: 'hut' | 'sawmill' | 'warehouse';
+  cells: Tile[]; // huella lógica (todas marcadas con building en la rejilla)
+  logs: number; // cabaña
+  busy: boolean; // sierra
+  timer: number; // sierra
+  done: boolean; // sierra: tablón listo
+  planks: number; // almacén
+}
+
 export interface World {
   grid: Grid;
   settlers: Settler[];
-  hut: { x: number; y: number; logs: number };
-  sawmill: { x: number; y: number; busy: boolean; timer: number; done: boolean };
-  warehouse: { x: number; y: number; planks: number };
+  hut: Building;
+  sawmill: Building;
+  warehouse: Building;
+  stumps: Tile[]; // tocones visuales (transitables)
   time: number;
   won: boolean;
 }
@@ -36,6 +49,15 @@ function adjacentFree(grid: Grid, tx: number, ty: number): Tile | null {
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]];
   for (const [dx, dy] of dirs) {
     if (grid.passable(tx + dx, ty + dy)) return { x: tx + dx, y: ty + dy };
+  }
+  return null;
+}
+
+/** Celda libre adyacente a cualquier celda de la huella. */
+function adjacentTo(grid: Grid, cells: Tile[]): Tile | null {
+  for (const c of cells) {
+    const adj = adjacentFree(grid, c.x, c.y);
+    if (adj) return adj;
   }
   return null;
 }
@@ -75,6 +97,10 @@ function moveAlong(s: Settler, dt: number): boolean {
   return false;
 }
 
+function markFootprint(grid: Grid, kind: string, cells: Tile[]): void {
+  for (const c of cells) grid.get(c.x, c.y).building = kind;
+}
+
 export function createDemoWorld(): World {
   const grid = new Grid(15, 8);
   for (let x = 1; x <= 13; x++) grid.setTerrain(x, 4, 'road');
@@ -86,13 +112,14 @@ export function createDemoWorld(): World {
   for (const t of forest) grid.setTerrain(t.x, t.y, 'forest');
   grid.setTerrain(12, 1, 'rock');
   grid.setTerrain(13, 2, 'rock');
-  const hut = { x: 4, y: 6, logs: 0 };
-  const sawmill = { x: 7, y: 6, busy: false, timer: 0, done: false };
-  const warehouse = { x: 10, y: 6, planks: 0 };
-  grid.get(hut.x, hut.y).building = 'hut';
-  grid.get(sawmill.x, sawmill.y).building = 'sawmill';
-  grid.get(warehouse.x, warehouse.y).building = 'warehouse';
-  const w: World = { grid, settlers: [], hut, sawmill, warehouse, time: 0, won: false };
+  for (const [x, y] of [[13, 6], [14, 6], [13, 7], [14, 7]]) grid.setTerrain(x, y, 'water');
+  const hut: Building = { kind: 'hut', cells: [{ x: 4, y: 6 }, { x: 5, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0 };
+  const sawmill: Building = { kind: 'sawmill', cells: [{ x: 7, y: 6 }, { x: 8, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0 };
+  const warehouse: Building = { kind: 'warehouse', cells: [{ x: 9, y: 6 }, { x: 10, y: 6 }, { x: 11, y: 6 }], logs: 0, busy: false, timer: 0, done: false, planks: 0 };
+  markFootprint(grid, 'hut', hut.cells);
+  markFootprint(grid, 'sawmill', sawmill.cells);
+  markFootprint(grid, 'warehouse', warehouse.cells);
+  const w: World = { grid, settlers: [], hut, sawmill, warehouse, stumps: [], time: 0, won: false };
   const jack: Settler = {
     id: 1, job: 'lumberjack', x: 4, y: 5, path: [], state: 'toTree',
     timer: 0, carry: null, from: null, to: null, building: null,
@@ -130,8 +157,9 @@ function tickLumberjack(w: World, s: Settler, dt: number): void {
     s.timer -= dt;
     if (s.timer <= 0 && s.to) {
       w.grid.setTerrain(s.to.x, s.to.y, 'grass');
+      w.stumps.push({ x: s.to.x, y: s.to.y });
       s.carry = 'log';
-      const adj = adjacentFree(w.grid, w.hut.x, w.hut.y);
+      const adj = adjacentTo(w.grid, w.hut.cells);
       if (adj) setPathTo(w, s, adj.x, adj.y);
       s.state = 'toHut';
     }
@@ -147,28 +175,26 @@ function tickLumberjack(w: World, s: Settler, dt: number): void {
 }
 
 function tickCarrier(w: World, s: Settler, dt: number): void {
+  const goPickup = (b: Building, cargo: 'sawmill' | 'warehouse') => {
+    const adj = adjacentTo(w.grid, b.cells);
+    if (!adj) return;
+    setPathTo(w, s, adj.x, adj.y);
+    const c = b.cells[0];
+    s.from = { x: c.x, y: c.y };
+    const dst = cargo === 'sawmill' ? w.sawmill : w.warehouse;
+    const dc = dst.cells[0];
+    s.to = { x: dc.x, y: dc.y };
+    s.building = cargo;
+    s.state = 'toPickup';
+  };
   if (s.state === 'idle') {
     // Prioridad: llevar tablón listo al almacén; si no, llevar tronco al aserradero.
     if (w.sawmill.done) {
-      const adj = adjacentFree(w.grid, w.sawmill.x, w.sawmill.y);
-      if (adj) {
-        setPathTo(w, s, adj.x, adj.y);
-        s.from = { x: w.sawmill.x, y: w.sawmill.y };
-        s.to = { x: w.warehouse.x, y: w.warehouse.y };
-        s.building = 'warehouse';
-        s.state = 'toPickup';
-      }
+      goPickup(w.sawmill, 'warehouse');
       return;
     }
     if (w.hut.logs > 0 && !w.sawmill.busy && !w.sawmill.done) {
-      const adj = adjacentFree(w.grid, w.hut.x, w.hut.y);
-      if (adj) {
-        setPathTo(w, s, adj.x, adj.y);
-        s.from = { x: w.hut.x, y: w.hut.y };
-        s.to = { x: w.sawmill.x, y: w.sawmill.y };
-        s.building = 'sawmill';
-        s.state = 'toPickup';
-      }
+      goPickup(w.hut, 'sawmill');
     }
     return;
   }
@@ -177,13 +203,13 @@ function tickCarrier(w: World, s: Settler, dt: number): void {
       if (s.building === 'sawmill' && w.hut.logs > 0) {
         w.hut.logs--;
         s.carry = 'log';
-        const adj = adjacentFree(w.grid, w.sawmill.x, w.sawmill.y);
+        const adj = adjacentTo(w.grid, w.sawmill.cells);
         if (adj) setPathTo(w, s, adj.x, adj.y);
         s.state = 'toDrop';
       } else if (s.building === 'warehouse' && w.sawmill.done) {
         w.sawmill.done = false;
         s.carry = 'plank';
-        const adj = adjacentFree(w.grid, w.warehouse.x, w.warehouse.y);
+        const adj = adjacentTo(w.grid, w.warehouse.cells);
         if (adj) setPathTo(w, s, adj.x, adj.y);
         s.state = 'toDrop';
       } else {

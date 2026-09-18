@@ -7,9 +7,9 @@
 - [x] T003 Atlas (`python scripts/make-atlas.py` -> `public/atlas/`) + `GameScene` demo top-down
 - [x] T004 Sim grid 15x8 + A* + tests (`tests/astar.test.ts`, 4 tests)
 - [x] T005 Economy tick 20Hz: talar→tronco→sierra→tablón→almacén + tests (`tests/economy.test.ts`, 3 tests, victoria verificada)
-- [x] V1 visual: Retina→64, +grass_var/dirt/water/sawmill, mapa rico (flores,
-  tierra, estanque), sierra propia, juice (temblor tala, bote, humo, nubes,
-  bandera), HUD barra madera. Auto-deploy Vercel OK.
+- [x] UH-iso: 24 sprites CC-BY-SA Unknown Horizons (leñador idle/move/carry/work,
+  edificios, árboles, duelda 64x32) + `curate-uh.py` + `atlasMeta` + vista iso
+  (huellas, tocones, stock en cabaña). Enmienda top-down → iso.
 - [ ] T006 Edificios: colocar/solar/andamio/terminado + territorio
 - [ ] T007 Vista colonos: FSM + carry sprites + depth por filas
 - [ ] T008 HUD: minimapa, panel, stocks, x1/x2/pausa

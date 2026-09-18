@@ -1,5 +1,0 @@
-Pack: Kenney Medieval RTS (CC0)
-Original: https://kenney.nl/assets/medieval-rts
-Mirror usado (red corporativa bloquea kenney.nl/OGA): https://github.com/meehow/medievalRTS (clone --depth 1)
-Solo se vendorizan License.txt + los 10 PNG usados por scripts/curate-cc0.py
-V1: se usan las versiones Retina (128) reducidas a 64 (mas nitidas). Nuevos: Tile_51 (flores), Tile_13 (tierra), Tile_27 (agua), Structure_21 (sierra).

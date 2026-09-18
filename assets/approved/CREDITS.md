@@ -1,25 +1,16 @@
-# Créditos Lote 1+ (T002b + V1 visual)
+# Créditos de arte (migración UH-iso — sustituye al lote Kenney)
 
-- 13 PNG CC0 del pack **Kenney Medieval RTS** (Kenney Vleugels, kenney.nl, CC0 1.0):
-  grass, grass_var (flores), dirt, water, road, pine, leaf_tree, log, rock,
-  warehouse, woodcutter, sawmill (casa con leña), worker_idle.
-  V1 usa las versiones **Retina (128)** reducidas a 64 (más nítidas).
-  Original: https://kenney.nl/assets/medieval-rts — License.txt en
-  `assets/vendor/kenney-medieval-rts/`. Mirror usado para descargar (la red
-  corporativa bloquea kenney.nl/OGA por TLS): https://github.com/meehow/medievalRTS
-  (clone --depth 1; solo se vendorizan License.txt + los PNG usados).
-- 3 derivados documentados en `scripts/curate-cc0.py`:
-  worker_carry_log (Unit_06 + tronco), flag (procedural estilo plano), _style_master.
+Todo el arte visible es de **Unknown Horizons** (unknown-horizons/unknown-horizons
+y unknown-horizons/gfx), **contenido mayormente CC-BY-SA 3.0** (ver
+unknown-horizons.org y `doc/LICENSE` del proyecto original), por su equipo y
+colaboradores (entre otros devviktoria, TheFunnySide). Rotación usada: 135 (SE).
 
-- 9 PNG CC0 del pack **Kenney Medieval RTS** (Kenney Vleugels, kenney.nl, CC0 1.0):
-  grass, road, pine, leaf_tree, log, rock, warehouse, woodcutter, worker_idle.
-  Original: https://kenney.nl/assets/medieval-rts — License.txt en
-  `assets/vendor/kenney-medieval-rts/`. Mirror usado para descargar (la red
-  corporativa bloquea kenney.nl/OGA por TLS): https://github.com/meehow/medievalRTS
-  (clone --depth 1; solo se vendorizan License.txt + los 10 PNG usados).
-- 3 derivados documentados en `scripts/curate-cc0.py`:
-  worker_carry_log (Unit_06 + tronco), flag (procedural estilo plano), _style_master.
-- Sin assets de Blue Byte/Ubisoft. Atribución a Kenney no obligatoria (CC0) pero incluida.
-- Regenerable: `python scripts/curate-cc0.py`.
-- Lote 2 (T003+): cantera, aserradero, residencia, andamios, humo, iconos —
-  saldrán del mismo pack CC0 o de derivados con el mismo script.
+Vendorizado en `assets/vendor/unknown-horizons/` (24 PNG + `CC-BY-SA.txt` +
+`SOURCE.txt`). Solo esos ficheros; el resto del pack no se distribuye aquí.
+
+Derivados de este repo (compartidos bajo **CC-BY-SA 3.0** como exige la licencia):
+`hut_logs1/2` (composite cabaña + overlay de troncos), `flag` (banderín iso
+procedural), `_style_master`, anclas de `src/view/atlasMeta.ts`. Pipeline:
+`python scripts/curate-uh.py`.
+
+Sin assets de Blue Byte/Ubisoft. Atribución visible: cartel en el README.

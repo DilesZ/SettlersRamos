@@ -9,13 +9,15 @@
    Solo permitido en ramas `spike/` desechables.
 2. **Sim desacoplada del render:** toda la economía en `src/sim/` TypeScript puro, 20 ticks/s,
    determinista y testeable sin Phaser. `src/view/` solo dibuja.
-3. **Vista top-down 2D coherente (enmienda T002b):** el pack CC0 disponible es
-   top-down, no iso. Tiles 64x64, edificios y colonos en canvas 64x64 con outline
-   oscuro, luz arriba-izquierda, paleta cálida Kenney. Toda la slice usa la misma
+3. **Vista iso 2:1 estilo Unknown Horizons (enmienda UH-iso):** tiles 64x32,
+   edificios multi-celda con huella lógica en la sim, ancla base-centro por sprite
+   (`src/view/atlasMeta.ts` generado), rotación 135 (SE) + flipX. Bosque y agua
+   bloquean; al talar queda tocón visual. Toda la slice usa la misma
    perspectiva; prohibido mezclar iso y top-down.
-4. **Fuentes de assets (orden):** 1º packs CC0 vendorizados en `assets/vendor/` con
-   `License.txt` + `SOURCE.txt`; 2º derivados documentados en `scripts/curate-cc0.py`;
-   3º Nano Banana manual (ver `assets/NANO_BANANA_BRIEF.md`). Nada de Ubi/Blue Byte.
+4. **Fuentes de assets (orden):** 1º contenido CC-BY-SA vendorizado en
+   `assets/vendor/` con `SOURCE.txt` + crédito en `CREDITS.md` (los derivados de
+   este repo se comparten bajo CC-BY-SA); 2º derivados documentados en
+   `scripts/curate-uh.py`. Nada de Ubi/Blue Byte.
 5. **Balance en datos:** tiempos/costes/capacidades solo en `src/data/balance.json`. Nada hardcodeado.
 6. **Vercel siempre verde:** cada PR debe pasar `lint + asset-check + test + build`.
 

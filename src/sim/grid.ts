@@ -1,5 +1,5 @@
 // T004: rejilla genérica (ancho x alto). La slice usa 15x8; el motor soporta 48x48.
-export type Terrain = 'grass' | 'road' | 'forest' | 'rock';
+export type Terrain = 'grass' | 'road' | 'forest' | 'rock' | 'water';
 
 export interface Cell {
   terrain: Terrain;
@@ -30,11 +30,11 @@ export class Grid {
     this.get(x, y).terrain = t;
   }
 
-  /** Transitable para colonos: todo menos roca y celdas con edificio. */
+  /** Transitable: hierba y camino. Bosque (árboles altos), agua, roca y edificios bloquean. */
   passable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const c = this.get(x, y);
-    return c.terrain !== 'rock' && c.building === null;
+    return (c.terrain === 'grass' || c.terrain === 'road') && c.building === null;
   }
 
   /** Coste de entrar en la celda (camino más rápido). */

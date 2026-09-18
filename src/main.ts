@@ -1,18 +1,24 @@
 import Phaser from 'phaser';
 import './style.css';
 import { createDemoWorld, tick, World } from './sim/economy';
+import { ATLAS_META } from './view/atlasMeta';
 
-const TILE = 64;
+const TW = 64;
+const TH = 32;
+const OX = 310;
+const OY = 70;
 const TICK = 0.05;
 
-// Decorado fijo (no afecta a la sim): acentos de flores, tierra bajo edificios,
-// senderos de tierra del camino a las puertas y estanque en la esquina.
-const FLOWERS: Array<[number, number]> = [[6, 1], [9, 2], [2, 5], [11, 3], [8, 1], [5, 3], [13, 4]];
-const DIRT: Array<[number, number]> = [
-  [4, 6], [5, 6], [7, 6], [10, 6],
-  [4, 5], [7, 5], [10, 5],
-];
-const POND: Array<[number, number]> = [[13, 6], [14, 6], [13, 7], [14, 7]];
+function iso(x: number, y: number): { sx: number; sy: number } {
+  return { sx: OX + (x - y) * (TW / 2), sy: OY + (x + y) * (TH / 2) };
+}
+
+function footprintCenter(cells: Array<{ x: number; y: number }>): { x: number; y: number } {
+  return {
+    x: cells.reduce((a, c) => a + c.x, 0) / cells.length,
+    y: cells.reduce((a, c) => a + c.y, 0) / cells.length,
+  };
+}
 
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
@@ -22,7 +28,7 @@ class BootScene extends Phaser.Scene {
 class PreloadScene extends Phaser.Scene {
   constructor() { super('Preload'); }
   preload() {
-    this.load.atlas('lote1', 'atlas/atlas.png', 'atlas/atlas.json');
+    this.load.atlas('uh', 'atlas/atlas.png', 'atlas/atlas.json');
   }
   create() { this.scene.start('Game'); }
 }
@@ -34,7 +40,10 @@ class GameScene extends Phaser.Scene {
   private settlerSprites = new Map<number, Phaser.GameObjects.Image>();
   private treeSprites = new Map<string, Phaser.GameObjects.Image>();
   private treeBaseX = new Map<string, number>();
+  private stumpSprites = new Map<string, Phaser.GameObjects.Image>();
   private chopKey: string | null = null;
+  private hutImg!: Phaser.GameObjects.Image;
+  private hutFrame = '';
   private flagImg!: Phaser.GameObjects.Image;
   private hud!: Phaser.GameObjects.Text;
   private sawBar!: Phaser.GameObjects.Rectangle;
@@ -43,77 +52,82 @@ class GameScene extends Phaser.Scene {
 
   constructor() { super('Game'); }
 
+  private put(frame: string, x: number, y: number, depth: number): Phaser.GameObjects.Image {
+    const m = ATLAS_META[frame];
+    const { sx, sy } = iso(x, y);
+    return this.add.image(sx, sy, 'uh', frame)
+      .setOrigin(m.ax / m.w, m.ay / m.h)
+      .setDepth(depth);
+  }
+
   create() {
     this.world = createDemoWorld();
     const w = this.world;
-    // Suelo base
     for (let y = 0; y < w.grid.h; y++) {
       for (let x = 0; x < w.grid.w; x++) {
         const t = w.grid.get(x, y).terrain;
-        const frame = t === 'road' ? 'road' : 'grass';
-        this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', frame).setDepth(y * 10);
+        const frame = t === 'road' ? 'road' : t === 'water' ? 'water' : t === 'rock' ? 'grass' : 'grass';
+        this.put(frame, x, y, (x + y) * 10);
+        if (t === 'rock') this.put('rock', x, y, (x + y) * 10 + 1);
       }
     }
-    for (const [x, y] of FLOWERS)
-      this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', 'grass_var').setDepth(y * 10 + 0.5);
-    for (const [x, y] of DIRT)
-      this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', 'dirt').setDepth(y * 10 + 0.4);
-    for (const [x, y] of POND)
-      this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', 'water').setDepth(y * 10 + 0.6);
-    // Rocas
-    for (let y = 0; y < w.grid.h; y++)
-      for (let x = 0; x < w.grid.w; x++)
-        if (w.grid.get(x, y).terrain === 'rock')
-          this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', 'rock').setDepth(y * 10 + 1);
-    // Edificios con cartel
-    const building = (x: number, y: number, frame: string, name: string) => {
-      this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', frame).setDepth(y * 10 + 2);
-      this.add.text(x * TILE + 32, y * TILE + 56, name, {
-        fontSize: '10px', color: '#fff', backgroundColor: '#00000077',
-      }).setOrigin(0.5).setDepth(y * 10 + 3);
+    // Edificios (huella centrada)
+    const hc = footprintCenter(w.hut.cells);
+    const sc = footprintCenter(w.sawmill.cells);
+    const wc = footprintCenter(w.warehouse.cells);
+    this.hutImg = this.put('hut', hc.x, hc.y, (hc.x + hc.y) * 10 + 3);
+    this.hutFrame = 'hut';
+    this.put('sawmill', sc.x, sc.y, (sc.x + sc.y) * 10 + 3);
+    this.put('warehouse', wc.x, wc.y, (wc.x + wc.y) * 10 + 3);
+    const tag = (x: number, y: number, name: string) => {
+      const { sx, sy } = iso(x, y);
+      this.add.text(sx, sy + 26, name, {
+        fontSize: '11px', color: '#fff', backgroundColor: '#00000077',
+      }).setOrigin(0.5).setDepth(500);
     };
-    building(w.warehouse.x, w.warehouse.y, 'warehouse', 'ALMACÉN');
-    building(w.hut.x, w.hut.y, 'woodcutter', 'LEÑADOR');
-    building(w.sawmill.x, w.sawmill.y, 'sawmill', 'SIERRA');
-    // Pila de troncos junto a la cabaña + bandera de territorio
-    this.add.image(5 * TILE + 32, 6 * TILE + 32, 'lote1', 'log').setDepth(61);
-    this.flagImg = this.add.image(w.hut.x * TILE - 40, w.hut.y * TILE + 20, 'lote1', 'flag').setDepth(72);
+    tag(hc.x, hc.y, 'LEÑADOR');
+    tag(sc.x, sc.y, 'SIERRA');
+    tag(wc.x, wc.y, 'ALMACÉN');
+    this.flagImg = this.put('flag', 3.4, 6.1, 200);
     // Humo de la sierra
+    const smoke = iso(sc.x + 0.35, sc.y - 0.15);
     for (let i = 0; i < 3; i++) {
-      const puff = this.add.circle(w.sawmill.x * TILE + 44, w.sawmill.y * TILE + 6, 5, 0xdddddd, 0.55)
-        .setDepth(73);
+      const puff = this.add.circle(smoke.sx, smoke.sy - 52, 5, 0xe8e8e8, 0.5).setDepth(400);
       this.tweens.add({
         targets: puff, y: puff.y - 30, alpha: 0, scale: 1.8,
         duration: 2200, delay: i * 700, repeat: -1,
       });
     }
-    // Nubes a la deriva
+    // Nubes
     for (let i = 0; i < 2; i++) {
-      const c = this.add.container(i === 0 ? 200 : 700, 60 + i * 50).setDepth(95);
-      const e1 = this.add.ellipse(0, 0, 90, 34, 0xffffff, 0.9);
-      const e2 = this.add.ellipse(30, -10, 60, 30, 0xffffff, 0.9);
-      const e3 = this.add.ellipse(-32, -6, 54, 26, 0xffffff, 0.9);
-      c.add([e1, e2, e3]);
+      const c = this.add.container(i === 0 ? 200 : 700, 50 + i * 40).setDepth(490);
+      c.add([
+        this.add.ellipse(0, 0, 90, 30, 0xffffff, 0.85),
+        this.add.ellipse(28, -9, 56, 26, 0xffffff, 0.85),
+        this.add.ellipse(-30, -5, 50, 22, 0xffffff, 0.85),
+      ]);
       this.tweens.add({
         targets: c, x: 1050, duration: 90000 + i * 30000, repeat: -1,
         onRepeat: () => c.setX(-100),
       });
     }
     for (const s of w.settlers) {
-      const img = this.add.image(s.x * TILE + 32, s.y * TILE + 32, 'lote1', 'worker_idle');
+      const { sx, sy } = iso(s.x, s.y);
+      const m = ATLAS_META['lj_idle'];
+      const img = this.add.image(sx, sy, 'uh', 'lj_idle')
+        .setOrigin(m.ax / m.w, m.ay / m.h);
       this.settlerSprites.set(s.id, img);
     }
-    this.sawBar = this.add.rectangle(0, 0, 40, 5, 0xffd23f).setDepth(80).setVisible(false);
-    this.chopBar = this.add.rectangle(0, 0, 30, 4, 0x7ddf64).setDepth(80).setVisible(false);
-    // Barra superior de madera
-    this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(100);
-    this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(100);
-    this.add.text(12, 10, '⚒ SETTLERS RAMOS', { fontSize: '17px', color: '#ffd98a' }).setDepth(101);
-    this.hud = this.add.text(230, 10, '', { fontSize: '15px', color: '#fff' }).setDepth(101);
+    this.sawBar = this.add.rectangle(0, 0, 40, 5, 0xffd23f).setDepth(480).setVisible(false);
+    this.chopBar = this.add.rectangle(0, 0, 30, 4, 0x7ddf64).setDepth(480).setVisible(false);
+    this.add.rectangle(0, 0, 960, 42, 0x4a3220).setOrigin(0).setDepth(500);
+    this.add.rectangle(0, 42, 960, 3, 0x2e1f14).setOrigin(0).setDepth(500);
+    this.add.text(12, 10, '⚒ SETTLERS RAMOS · iso UH', { fontSize: '17px', color: '#ffd98a' }).setDepth(501);
+    this.hud = this.add.text(330, 10, '', { fontSize: '15px', color: '#fff' }).setDepth(501);
     const btn = (x: number, label: string, fn: () => void) => {
       this.add.text(x, 8, label, {
         fontSize: '15px', color: '#ffe08a', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
-      }).setDepth(101).setInteractive({ useHandCursor: true }).on('pointerdown', fn);
+      }).setDepth(501).setInteractive({ useHandCursor: true }).on('pointerdown', fn);
     };
     btn(836, '❚❚', () => { this.speed = 0; });
     btn(876, '1×', () => { this.speed = 1; });
@@ -121,7 +135,7 @@ class GameScene extends Phaser.Scene {
     this.winText = this.add.text(480, 250, '¡VICTORIA!\n10 tablones entregados', {
       fontSize: '36px', color: '#ffe08a', backgroundColor: '#000000cc',
       padding: { x: 24, y: 16 }, align: 'center',
-    }).setOrigin(0.5).setDepth(200).setVisible(false);
+    }).setOrigin(0.5).setDepth(600).setVisible(false);
   }
 
   update(time: number, delta: number) {
@@ -134,7 +148,7 @@ class GameScene extends Phaser.Scene {
         this.acc -= TICK;
       }
     }
-    // Árboles sincronizados con la rejilla (+ temblor al talar)
+    // Árboles + tocones sincronizados con la sim
     const seen = new Set<string>();
     for (let y = 0; y < w.grid.h; y++) {
       for (let x = 0; x < w.grid.w; x++) {
@@ -143,8 +157,7 @@ class GameScene extends Phaser.Scene {
         seen.add(k);
         if (!this.treeSprites.has(k)) {
           const frame = (x + y) % 2 === 0 ? 'pine' : 'leaf_tree';
-          const img = this.add.image(x * TILE + 32, y * TILE + 32, 'lote1', frame)
-            .setDepth(y * 10 + 1);
+          const img = this.put(frame, x, y, (x + y) * 10 + 2);
           this.treeSprites.set(k, img);
           this.treeBaseX.set(k, img.x);
         }
@@ -153,6 +166,24 @@ class GameScene extends Phaser.Scene {
     for (const [k, img] of this.treeSprites) {
       if (!seen.has(k)) { img.destroy(); this.treeSprites.delete(k); this.treeBaseX.delete(k); }
     }
+    const seenStumps = new Set<string>();
+    for (const t of w.stumps) {
+      const k = `s${t.x},${t.y}`;
+      seenStumps.add(k);
+      if (!this.stumpSprites.has(k)) {
+        this.stumpSprites.set(k, this.put('stump', t.x, t.y, (t.x + t.y) * 10 + 1));
+      }
+    }
+    for (const [k, img] of this.stumpSprites) {
+      if (!seenStumps.has(k)) { img.destroy(); this.stumpSprites.delete(k); }
+    }
+    // Cabaña muestra stock de troncos
+    const wantHut = w.hut.logs >= 3 ? 'hut_logs2' : w.hut.logs >= 1 ? 'hut_logs1' : 'hut';
+    if (wantHut !== this.hutFrame) {
+      this.hutFrame = wantHut;
+      this.hutImg.setTexture('uh', wantHut);
+    }
+    // Temblor del árbol talado
     const jack = w.settlers[0];
     const newChopKey = jack.state === 'chopping' && jack.to ? `${jack.to.x},${jack.to.y}` : null;
     if (this.chopKey && this.chopKey !== newChopKey) {
@@ -162,29 +193,37 @@ class GameScene extends Phaser.Scene {
     this.chopKey = newChopKey;
     if (newChopKey) {
       const t = this.treeSprites.get(newChopKey);
-      if (t) t.x = this.treeBaseX.get(newChopKey)! + Math.sin(time * 0.045) * 2.5;
+      if (t) t.x = this.treeBaseX.get(newChopKey)! + Math.sin(time * 0.045) * 2;
     }
-    // Colonos (+ bote al andar)
+    // Colonos con animación por estado (rotación 135 + flipX; 8-dir en tarea futura)
     for (const s of w.settlers) {
       const img = this.settlerSprites.get(s.id)!;
-      const walking = s.path.length > 0;
-      const bob = walking ? -Math.abs(Math.sin(time * 0.012 + s.id * 2)) * 3 : 0;
-      img.setPosition(s.x * TILE + 32, s.y * TILE + 32 + bob);
-      img.setDepth(Math.floor(s.y) * 10 + 3);
-      img.setTexture('lote1', s.carry ? 'worker_carry_log' : 'worker_idle');
-      img.setFlipX(s.path.length > 0 && s.path[0].x * TILE + 32 < img.x);
+      const { sx, sy } = iso(s.x, s.y);
+      const moving = s.path.length > 0;
+      let frame = 'lj_idle';
+      if (s.state === 'chopping') frame = 'lj_work';
+      else if (s.carry) frame = `lj_carry${Math.floor(time / 140 + s.id) % 4 + 1}`;
+      else if (moving) frame = `lj_walk${Math.floor(time / 140 + s.id) % 4 + 1}`;
+      img.setTexture('uh', frame);
+      img.setPosition(sx, sy);
+      img.setDepth((s.x + s.y) * 10 + 4);
+      if (moving) {
+        const nsx = OX + (s.path[0].x - s.path[0].y) * 32;
+        img.setFlipX(nsx < sx);
+      }
     }
-    // Bandera ondeando
     this.flagImg.setScale(1 + Math.sin(time * 0.004) * 0.05, 1);
-    // Barras de progreso
-    if (jack.state === 'chopping') {
+    if (jack.state === 'chopping' && jack.to) {
+      const p = iso(jack.to.x, jack.to.y);
       this.chopBar.setVisible(true);
-      this.chopBar.setPosition(jack.x * TILE + 32, jack.y * TILE - 6);
+      this.chopBar.setPosition(p.sx, p.sy - 66);
       this.chopBar.setScale(Math.max(0.05, jack.timer / 8), 1);
     } else this.chopBar.setVisible(false);
     if (w.sawmill.busy) {
+      const sc = footprintCenter(w.sawmill.cells);
+      const p = iso(sc.x, sc.y);
       this.sawBar.setVisible(true);
-      this.sawBar.setPosition(w.sawmill.x * TILE + 32, w.sawmill.y * TILE - 12);
+      this.sawBar.setPosition(p.sx, p.sy - 78);
       this.sawBar.setScale(Math.max(0.05, w.sawmill.timer / 10), 1);
     } else this.sawBar.setVisible(false);
     const spd = this.speed === 0 ? 'PAUSA' : `${this.speed}×`;
@@ -201,6 +240,6 @@ new Phaser.Game({
   parent: 'game',
   width: 960,
   height: 540,
-  backgroundColor: '#1a2b1a',
+  backgroundColor: '#20301c',
   scene: [BootScene, PreloadScene, GameScene],
 });
