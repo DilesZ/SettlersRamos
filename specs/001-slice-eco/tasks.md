@@ -1,7 +1,7 @@
 # Tasks 001 — orden estricto, una por PR
 
 - [ ] T001 S0: scaffolding Vite+Phaser+TS+CI+Vercel (este commit)
-- [ ] T002 Lote1 Nano Banana: generar+limpiar 12 assets → `assets/approved/` + `CREDITS.md`
+- [x] T002 Lote1 procedural: 12 assets en `assets/approved/` + `CREDITS.md` (`python scripts/gen-assets.py`)
 - [ ] T003 Atlas: `atlas.png/.json` + `PreloadScene` muestra 1 árbol + 1 obrero andando
 - [ ] T004 Sim grid + A* + tests (`astar.test.ts`)
 - [ ] T005 Economy tick: talar→tronco→tablón + tests (`economy.test.ts`)
