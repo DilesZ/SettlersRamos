@@ -11,7 +11,7 @@ const config: Phaser.Types.Core.GameConfig = {
       key: 'Boot',
       create(this: Phaser.Scene) {
         this.add
-          .text(480, 270, 'SettlersRamos S0\nT002 pendiente: genera el Lote 1 en Nano Banana', {
+          .text(480, 270, 'SettlersRamos S0\nT002b OK: Lote 1 CC0 (Kenney) en approved/ — sigue T003 atlas', {
             align: 'center',
             fontSize: '18px',
             color: '#ffffff'

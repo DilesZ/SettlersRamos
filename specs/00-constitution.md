@@ -9,10 +9,13 @@
    Solo permitido en ramas `spike/` desechables.
 2. **Sim desacoplada del render:** toda la economía en `src/sim/` TypeScript puro, 20 ticks/s,
    determinista y testeable sin Phaser. `src/view/` solo dibuja.
-3. **Calidad iso 2:1:** tile 64x32, edificios 128-192px vista SE fija, colonos ~32x44,
-   6 frames andar/llevar, outline 1px oscuro, luz arriba-izquierda, paleta cálida.
-4. **Fondo magenta #FF00FF = transparencia.** Todo `raw/` generado con Nano Banana sobre
-   magenta se limpia en Photopea antes de pasar a `approved/`.
+3. **Vista top-down 2D coherente (enmienda T002b):** el pack CC0 disponible es
+   top-down, no iso. Tiles 64x64, edificios y colonos en canvas 64x64 con outline
+   oscuro, luz arriba-izquierda, paleta cálida Kenney. Toda la slice usa la misma
+   perspectiva; prohibido mezclar iso y top-down.
+4. **Fuentes de assets (orden):** 1º packs CC0 vendorizados en `assets/vendor/` con
+   `License.txt` + `SOURCE.txt`; 2º derivados documentados en `scripts/curate-cc0.py`;
+   3º Nano Banana manual (ver `assets/NANO_BANANA_BRIEF.md`). Nada de Ubi/Blue Byte.
 5. **Balance en datos:** tiempos/costes/capacidades solo en `src/data/balance.json`. Nada hardcodeado.
 6. **Vercel siempre verde:** cada PR debe pasar `lint + asset-check + test + build`.
 
@@ -21,8 +24,8 @@
 - Partida completable 8-12 min: entregar 10 tablones al almacén.
 - 60fps con 15 colonos en portátil medio. Pausa / x1 / x2 funcionan.
 - Guardado `localStorage` + minimapa + panel edificio.
-- Sin assets originales de terceros. Licencias anotadas en `assets/approved/CREDITS.md`.
+- Sin assets originales de terceros salvo CC0 vendorizado. Licencias anotadas en `assets/approved/CREDITS.md`.
 
 ## 3. Flujo Spec-Driven
 `spec.md -> plan.md -> tasks.md -> PR por tarea -> review -> merge`.
-Si una tarea necesita un sprite no aprobado, se bloquea y se genera primero con Nano Banana.
+Si una tarea necesita un sprite no aprobado, se bloquea y se cura primero (CC0 o derivado).

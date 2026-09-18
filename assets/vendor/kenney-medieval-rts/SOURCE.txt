@@ -1,0 +1,4 @@
+Pack: Kenney Medieval RTS (CC0)
+Original: https://kenney.nl/assets/medieval-rts
+Mirror usado (red corporativa bloquea kenney.nl/OGA): https://github.com/meehow/medievalRTS (clone --depth 1)
+Solo se vendorizan License.txt + los 10 PNG usados por scripts/curate-cc0.py
