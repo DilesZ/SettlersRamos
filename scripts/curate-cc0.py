@@ -1,5 +1,6 @@
-"""T002b: cura el Lote 1 desde el pack CC0 vendorizado (Kenney Medieval RTS, via mirror GitHub).
-Reproducible: `python scripts/curate-cc0.py` -> assets/raw/ + assets/approved/.
+"""T002b + V1 visual: cura el Lote 1+ desde el pack CC0 vendorizado (Kenney Medieval RTS).
+V1: fuentes Retina (128) reducidas a 64 con LANCZOS (bordes más nítidos) + 4 slots
+nuevos (grass_var, dirt, water, sawmill). Reproducible: `python scripts/curate-cc0.py`.
 
 Mapeo fuente -> slot (ver specs/001-slice-eco/tasks.md T002b):
   grass            <- medievalTile_58.png          (hierba lisa)
@@ -11,6 +12,10 @@ Mapeo fuente -> slot (ver specs/001-slice-eco/tasks.md T002b):
   warehouse        <- medievalStructure_19.png     (gran salon/almacen)
   woodcutter       <- medievalStructure_17.png     (cabana)
   worker_idle      <- medievalUnit_06.png          (aldeano)
+  grass_var        <- medievalTile_51.png          (hierba con flores, acento)
+  dirt             <- medievalTile_13.png          (tierra, bajo edificios)
+  water            <- medievalTile_27.png          (agua, estanque)
+  sawmill          <- medievalStructure_21.png     (casa con pila de lena: sierra)
   worker_carry_log <- DERIVADO: Unit_06 + tronco al hombro (PIL, paleta Kenney)
   flag             <- DERIVADO procedural estilo plano Kenney (no hay bandera en el pack)
   _style_master    <- DERIVADO: tablero con los 12 + fuentes
@@ -22,7 +27,8 @@ from pathlib import Path
 import shutil
 
 VENDOR = Path("assets/vendor/kenney-medieval-rts")
-SRC = VENDOR / "PNG" / "Default size"
+SRC = VENDOR / "PNG" / "Retina"
+OUT64 = 64
 RAW = Path("assets/raw")
 OUT = Path("assets/approved")
 OUT.mkdir(parents=True, exist_ok=True)
@@ -40,13 +46,20 @@ MAP = {
     "warehouse": ("Structure/medievalStructure_19.png", False),
     "woodcutter": ("Structure/medievalStructure_17.png", False),
     "worker_idle": ("Unit/medievalUnit_06.png", False),
+    "grass_var": ("Tile/medievalTile_51.png", False),
+    "dirt": ("Tile/medievalTile_13.png", False),
+    "water": ("Tile/medievalTile_27.png", False),
+    "sawmill": ("Structure/medievalStructure_21.png", False),
 }
 
 
 def load(rel: str) -> Image.Image:
     p = SRC / rel
     assert p.exists(), f"falta fuente CC0: {p}"
-    return Image.open(p).convert("RGBA")
+    img = Image.open(p).convert("RGBA")
+    if img.size != (OUT64, OUT64):
+        img = img.resize((OUT64, OUT64), Image.LANCZOS)
+    return img
 
 
 def save(img: Image.Image, name: str, raw_src: Image.Image | None = None):
@@ -60,7 +73,7 @@ def save(img: Image.Image, name: str, raw_src: Image.Image | None = None):
 
 for slot, (rel, _) in MAP.items():
     img = load(rel)
-    assert img.size == (64, 64), f"{rel}: se esperaba 64x64, es {img.size}"
+    assert img.size == (OUT64, OUT64), f"{rel}: se esperaba 64x64, es {img.size}"
     save(img, slot, raw_src=img)
 
 # --- worker_carry_log: aldeano + tronco al hombro ---
@@ -87,16 +100,16 @@ d.line([(35, 14), (50, 17)], fill=(217, 95, 78, 255), width=2)
 save(flag, "flag")
 
 # --- _style_master: tablero de control del lote ---
-master = Image.new("RGBA", (640, 300), (24, 22, 32, 255))
+master = Image.new("RGBA", (640, 420), (24, 22, 32, 255))
 d = ImageDraw.Draw(master)
-d.text((12, 8), "SETTLERSRAMOS Lote1 T002b - Kenney Medieval RTS (CC0) + 3 derivados", fill=(255, 255, 255, 255))
-d.text((12, 26), "top-down 64x64 - mirror: github.com/meehow/medievalRTS - original: kenney.nl/assets/medieval-rts",
+d.text((12, 8), "SETTLERSRAMOS Lote1+ V1 - Kenney Medieval RTS (CC0) + 3 derivados", fill=(255, 255, 255, 255))
+d.text((12, 26), "top-down 64x64 desde Retina - mirror: github.com/meehow/medievalRTS - original: kenney.nl/assets/medieval-rts",
        fill=(180, 180, 180, 255))
-slots = ["grass", "road", "pine", "leaf_tree", "log", "rock",
-         "warehouse", "woodcutter", "worker_idle", "worker_carry_log", "flag"]
+slots = ["grass", "grass_var", "dirt", "water", "road", "pine", "leaf_tree", "log", "rock",
+         "warehouse", "woodcutter", "sawmill", "worker_idle", "worker_carry_log", "flag"]
 for i, s in enumerate(slots):
     im = Image.open(OUT / f"{s}.png")
-    x, y = 12 + (i % 6) * 104, 52 + (i // 6) * 120
+    x, y = 12 + (i % 5) * 126, 52 + (i // 5) * 120
     master.alpha_composite(im, (x + 20, y))
     d.text((x, y + 70), s, fill=(255, 255, 255, 255))
     tag = "CC0" if s not in ("worker_carry_log", "flag") else "derivado"
@@ -104,4 +117,4 @@ for i, s in enumerate(slots):
 master.save(OUT / "_style_master.png")
 master.save(RAW / "_style_master.png")
 
-print("T002b OK: 12 PNG en assets/approved/ (9 CC0 + 3 derivados documentados)")
+print("V1 OK: 16 PNG en assets/approved/ (13 CC0 + 3 derivados documentados)")

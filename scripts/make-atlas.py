@@ -9,8 +9,9 @@ APPROVED = Path("assets/approved")
 OUT = Path("public/atlas")
 OUT.mkdir(parents=True, exist_ok=True)
 
-names = ["grass", "road", "pine", "leaf_tree", "log", "rock",
-         "warehouse", "woodcutter", "worker_idle", "worker_carry_log", "flag"]
+names = ["grass", "grass_var", "dirt", "water", "road", "pine", "leaf_tree", "log",
+         "rock", "warehouse", "woodcutter", "sawmill", "worker_idle",
+         "worker_carry_log", "flag"]
 imgs = [(n, Image.open(APPROVED / f"{n}.png").convert("RGBA")) for n in names]
 for n, im in imgs:
     assert im.size == (64, 64), f"{n}: {im.size}"
